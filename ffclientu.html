@@ -1,0 +1,2845 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ffstream</title>
+<style>
+  html,body{margin:0;height:100%;background:#f4f4f4;}
+  body{display:flex;flex-direction:column;font-family:monospace;color:#222;}
+  canvas{width:100%;max-height:220px;background:#000;object-fit:contain;order:99;display:block;}
+  @media (orientation:landscape){ canvas{max-height:35vh;} }
+  #bar{padding:6px 10px;font-size:12px;background:#e8e8e8;border-bottom:1px solid #ccc;display:flex;gap:16px;flex-wrap:wrap;}
+  #bar span{opacity:.85;}
+  .warn{color:#a60;}
+  .bad{color:#c00;}
+  .ok{color:#080;}
+  #cmdPanel,#srcPanel{background:#fafafa;border-top:1px solid #ddd;padding:8px 10px;font-size:12px;display:flex;flex-direction:column;gap:8px;}
+  #cmdPanel .row,#srcPanel .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+  #cmdPanel label,#srcPanel label{display:flex;flex-direction:column;gap:2px;color:#456;font-size:11px;}
+  #ffCmd{
+    width:100%;height:70px;resize:vertical;background:#fff;color:#222;
+    border:1px solid #bbb;font-family:monospace;font-size:12px;padding:6px;
+    box-sizing:border-box;white-space:pre;
+  }
+  #cmdPanel input[type=text],#cmdPanel input[type=number],#srcPanel input[type=text],#srcPanel input[type=number]{
+    background:#fff;border:1px solid #bbb;color:#222;font-family:monospace;
+    padding:6px 8px;border-radius:3px;font-size:13px;width:110px;
+  }
+  #cmdPanel button,#srcPanel button{
+    background:#e0efe0;border:1px solid #9c9;color:#132;font-family:monospace;
+    padding:8px 14px;border-radius:3px;font-size:13px;cursor:pointer;
+  }
+  #cmdPanel button:hover,#srcPanel button:hover{border-color:#4a4;}
+  #cmdPanel button.stop,#srcPanel button.stop{background:#fde0d8;border-color:#c96;}
+  #cmdPanel button.stop:hover,#srcPanel button.stop:hover{border-color:#c33;}
+  #srcApiUrl{width:100%!important;box-sizing:border-box;}
+  #logPanel{background:#fafafa;border-top:1px solid #ddd;padding:8px 10px;font-size:12px;display:flex;flex-direction:column;gap:6px;}
+  #logPanel .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+  #logPanel button{
+    background:#e0efe0;border:1px solid #9c9;color:#132;font-family:monospace;
+    padding:6px 12px;border-radius:3px;font-size:12px;cursor:pointer;
+  }
+  #logArea{
+    width:100%;height:200px;background:#fff;color:#333;
+    border:1px solid #ccc;font-family:monospace;font-size:11px;padding:6px;
+    box-sizing:border-box;white-space:pre-wrap;
+  }
+  #logSummary{
+    background:#fff;color:#333;border:1px solid #ccc;font-family:monospace;
+    font-size:11px;padding:6px;box-sizing:border-box;white-space:pre;
+    line-height:1.5;
+  }
+  .upx-section{border:1px solid #ccc;border-radius:4px;margin:8px 0;background:#fafafa;}
+  .upx-section > summary{
+    cursor:pointer;padding:8px 10px;font-weight:bold;color:#222;
+    font-family:monospace;font-size:13px;list-style:none;user-select:none;
+  }
+  .upx-section > summary::-webkit-details-marker{display:none;}
+  .upx-section > summary::before{content:"▶ ";display:inline-block;transition:transform .1s;}
+  .upx-section[open] > summary::before{transform:rotate(90deg);}
+  .upx-section-body{padding:4px 10px 10px;}
+</style>
+</head>
+<body>
+<script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.2/dist/mp4box.all.min.js"></script>
+
+<div id="hostBar" style="padding:6px 10px;font-size:12px;background:#e8e8e8;border-bottom:1px solid #ccc;display:flex;gap:8px;align-items:center;font-family:monospace;color:#222;">
+  <label>server: <input id="wsHost" type="text" value="" placeholder="e.g. 100.121.250.119:7600" style="background:#fff;border:1px solid #bbb;color:#222;font-family:monospace;padding:4px 6px;border-radius:3px;width:220px;"></label>
+  <button id="wsConnectBtn" style="background:#e0efe0;border:1px solid #9c9;color:#132;font-family:monospace;padding:4px 10px;border-radius:3px;cursor:pointer;">connect</button>
+  <button id="fullscreenBtn" style="background:#e0efe0;border:1px solid #9c9;color:#132;font-family:monospace;padding:4px 10px;border-radius:3px;cursor:pointer;">fullscreen</button>
+  <label>start delay (ms): <input id="startDelayMs" type="number" value="200" min="0" step="100" style="width:70px;background:#fff;border:1px solid #bbb;color:#222;font-family:monospace;padding:4px 6px;border-radius:3px;"></label>
+  <label style="display:flex;align-items:center;gap:4px;cursor:pointer;margin-left:auto;"><input id="clockToggle" type="checkbox" style="width:auto;"> clock</label>
+  <span style="display:flex;align-items:center;gap:2px;">
+    <button id="clockFontMinus" type="button" style="background:#e0efe0;border:1px solid #9c9;color:#132;font-family:monospace;padding:2px 8px;border-radius:3px;cursor:pointer;">-</button>
+    <button id="clockFontPlus" type="button" style="background:#e0efe0;border:1px solid #9c9;color:#132;font-family:monospace;padding:2px 8px;border-radius:3px;cursor:pointer;">+</button>
+  </span>
+</div>
+
+<div id="floatingClock" style="position:fixed;z-index:999999;background:rgba(0,0,0,0.55);color:#fff;font-family:monospace;padding:2px 6px;border-radius:3px;cursor:move;user-select:none;top:8px;left:8px;display:none;">00:00:00</div>
+
+
+<div style="background:#dde; color:#114; font-family:monospace; font-size:13px; font-weight:bold; padding:6px 8px; border-top:2px solid #669;">▶ ORIGINAL (unupscaled, raw decoded video)</div>
+<div id="vWrap" style="position:relative;">
+<canvas id="v" width="1280" height="720"></canvas>
+</div>
+
+<div id="bar">
+  <span id="status">not connected</span>
+  <span>frames painted: <b id="played">0</b></span>
+  <span>frame queue: <b id="qlen">0</b></span>
+  <span>bytes recv: <b id="bytesRecv">0</b></span>
+</div>
+
+<div id="cmdPanel">
+  <div class="row">
+    <label style="flex:1;">ffmpeg command
+      <textarea id="ffCmd" spellcheck="false">ffmpeg -f gdigrab -framerate 30 -i desktop -c:v libx264 -preset ultrafast -tune zerolatency -crf 28 -g 8 -keyint_min 8 -sc_threshold 0 -an -movflags frag_keyframe+empty_moov+default_base_moof -f mp4 pipe:1</textarea>
+    </label>
+  </div>
+  <div class="row">
+    <label>profile: <select id="profileSelect" style="background:#fff;border:1px solid #bbb;color:#222;font-family:monospace;padding:6px 8px;border-radius:3px;font-size:13px;"><option value="">-- select --</option></select></label>
+    <input id="profileNameInput" type="text" placeholder="profile name" style="width:140px;">
+    <button id="btnProfileSave">Save profile</button>
+    <button id="btnProfileDelete" class="stop">Delete</button>
+  </div>
+  <div class="row">
+    <button id="btnStart">Start</button>
+    <button id="btnStop" class="stop">Stop</button>
+    <button id="btnRestart">Restart</button>
+    <span id="ctrlMsg"></span>
+  </div>
+</div>
+
+<div id="srcPanel">
+  <div class="row">
+    <label style="flex:1;">process-supervisor server URL
+      <input id="srcApiUrl" type="text" spellcheck="false" placeholder="https://your-ngrok-url.ngrok-free.dev">
+    </label>
+  </div>
+  <div class="row">
+    <label style="flex:1;">source command
+      <input id="srcCmdInput" type="text" spellcheck="false" placeholder="node zw">
+    </label>
+  </div>
+  <div class="row">
+    <button id="btnSrcStart">Start source</button>
+    <button id="btnSrcStop" class="stop">Stop source</button>
+    <button id="btnSrcRestart">Restart source</button>
+    <label style="flex-direction:row;align-items:center;gap:4px;">restart delay (ms)
+      <input id="srcRestartDelayMs" type="number" min="0" step="100" style="width:80px;">
+    </label>
+    <span id="srcCtrlMsg"></span>
+  </div>
+</div>
+
+<div id="logPanel">
+  <div class="row">
+    <button id="btnLogDownload">Download logs</button>
+    <button id="btnLogClear">Clear</button>
+    <button id="btnLogToggle">Show full log</button>
+  </div>
+  <div id="logSummary"></div>
+  <textarea id="logArea" readonly style="display:none;"></textarea>
+</div>
+
+<!-- ======================================================================
+     UPSCALER OVERLAY -- bolted on, reads #canvas (the existing main-loop
+     paint target) as a texture only, on a rAF loop of its own. Nothing
+     above this comment is modified; the WebCodecs decode/paint pipeline
+     in main()/decodeSegment()/paintLoop() is never touched by anything
+     below. Ported from the reference distance-buffer player: same
+     Catmull-Rom/Lanczos2/Lanczos3/FSR kernels, same unsharp/CAS/anti-ring,
+     same color grading (bright/contrast/saturate/hue/gamma/warmth/vignette).
+     The preview <video> panel above is explicitly NOT touched or upscaled.
+     ====================================================================== -->
+<div id="upx-panel-offset" style="margin-left:0px;">
+<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px;">
+    <button id="btnCollapseAll" type="button">Collapse all</button>
+    <button id="btnExpandAll" type="button">Expand all</button>
+</div>
+<details class="upx-section" id="sec-upscale" open>
+<summary>Upscale &amp; kernel</summary>
+<div class="upx-section-body">
+    <label><input type="checkbox" id="upx-toggle-cb"> Upscale enabled</label>
+    <label><input type="checkbox" id="upx-toggle-persist-cb"> Remember enabled state</label>
+<br><br>
+    <select id="upx-kernel">
+        <option value="catmullrom" selected>Catmull-Rom</option>
+        <option value="lanczos2">Lanczos2</option>
+        <option value="lanczos3">Lanczos3</option>
+        <option value="fsr">FSR (EASU+RCAS)</option>
+        <option value="detailrecover">Detail Recover (structure-tensor, heavy)</option>
+    </select>
+<br><br>
+    <label>Scale: <button class="upx-scale-step-minus" type="button">-</button> <input type="number" id="upx-scale" value="2" min="1" max="6" step="0.5" style="width:48px;"> <button class="upx-scale-step-plus" type="button">+</button></label>
+</div>
+</details>
+
+<details class="upx-section" id="sec-sharpen">
+<summary>Sharpening &amp; detail</summary>
+<div class="upx-section-body">
+    <span class="upx-slider-wrap">TapRadius:
+        <button class="upx-step-minus" data-target="upx-tapradius">-</button>
+        <input type="range" id="upx-tapradius" value="2" min="1" max="20" step="0.1" style="width:80px;">
+        <input type="number" id="upx-tapradius-num" value="2" min="1" max="20" step="0.1" style="width:52px;">
+        <button class="upx-step-plus" data-target="upx-tapradius">+</button>
+    </span>
+<br><br>
+    <span class="upx-slider-wrap">DetailWin:
+        <button class="upx-step-minus" data-target="upx-detailwin">-</button>
+        <input type="range" id="upx-detailwin" value="2" min="1" max="20" step="0.1" style="width:80px;">
+        <input type="number" id="upx-detailwin-num" value="2" min="1" max="20" step="0.1" style="width:52px;">
+        <button class="upx-step-plus" data-target="upx-detailwin">+</button>
+    </span>
+<br><br>
+    <span class="upx-slider-wrap">Detail:
+        <button class="upx-step-minus" data-target="upx-detail">-</button>
+        <input type="range" id="upx-detail" value="0" min="0" max="1000" step="10" style="width:80px;">
+        <input type="number" id="upx-detail-num" value="0" min="0" max="1000" step="10" style="width:44px;">
+        <button class="upx-step-plus" data-target="upx-detail">+</button>
+    </span>
+<br><br>
+    <span class="upx-slider-wrap">Sharp:
+        <button class="upx-step-minus" data-target="upx-sharp">-</button>
+        <input type="range" id="upx-sharp" value="35" min="0" max="250" style="width:80px;">
+        <input type="number" id="upx-sharp-num" value="35" min="0" max="250" style="width:44px;">
+        <button class="upx-step-plus" data-target="upx-sharp">+</button>
+    </span>
+<br><br>
+    <span class="upx-slider-wrap">CAS:
+        <button class="upx-step-minus" data-target="upx-cas">-</button>
+        <input type="range" id="upx-cas" value="0" min="0" max="250" style="width:80px;">
+        <input type="number" id="upx-cas-num" value="0" min="0" max="250" style="width:44px;">
+        <button class="upx-step-plus" data-target="upx-cas">+</button>
+    </span>
+<br><br>
+    <span class="upx-slider-wrap">AntiRing:
+        <button class="upx-step-minus" data-target="upx-antiring">-</button>
+        <input type="range" id="upx-antiring" value="0" min="0" max="250" style="width:80px;">
+        <input type="number" id="upx-antiring-num" value="0" min="0" max="250" style="width:44px;">
+        <button class="upx-step-plus" data-target="upx-antiring">+</button>
+    </span>
+</div>
+</details>
+
+<details class="upx-section" id="sec-display">
+<summary>Zoom &amp; display</summary>
+<div class="upx-section-body">
+    <button id="upx-zplus">Zoom +</button>
+    <button id="upx-zminus">Zoom -</button>
+    <button id="upx-fullscreen">Upscale fullscreen</button>
+    <span id="upx-res"></span>
+<br><br>
+    <label>Page font size: <button id="pageFontMinus" type="button">-</button> <button id="pageFontPlus" type="button">+</button> <span id="pageFontPct"></span></label>
+</div>
+</details>
+
+<details class="upx-section" id="sec-color">
+<summary>Color grading</summary>
+<div class="upx-section-body">
+    <span class="upx-slider-wrap">Bright:
+        <button class="upx-step-minus" data-target="upx-bright">-</button>
+        <input type="range" id="upx-bright" value="100" min="0" max="250" style="width:80px;">
+        <input type="number" id="upx-bright-num" value="100" min="0" max="250" style="width:44px;">
+        <button class="upx-step-plus" data-target="upx-bright">+</button>
+    </span>
+<br><br>
+    <span class="upx-slider-wrap">Contrast:
+        <button class="upx-step-minus" data-target="upx-contrast">-</button>
+        <input type="range" id="upx-contrast" value="100" min="0" max="250" style="width:80px;">
+        <input type="number" id="upx-contrast-num" value="100" min="0" max="250" style="width:44px;">
+        <button class="upx-step-plus" data-target="upx-contrast">+</button>
+    </span>
+<br><br>
+    <span class="upx-slider-wrap">Saturate:
+        <button class="upx-step-minus" data-target="upx-saturate">-</button>
+        <input type="range" id="upx-saturate" value="100" min="0" max="250" style="width:80px;">
+        <input type="number" id="upx-saturate-num" value="100" min="0" max="250" style="width:44px;">
+        <button class="upx-step-plus" data-target="upx-saturate">+</button>
+    </span>
+<br><br>
+    <span class="upx-slider-wrap">Hue:
+        <button class="upx-step-minus" data-target="upx-hue">-</button>
+        <input type="range" id="upx-hue" value="0" min="-180" max="180" style="width:80px;">
+        <input type="number" id="upx-hue-num" value="0" min="-180" max="180" style="width:44px;">
+        <button class="upx-step-plus" data-target="upx-hue">+</button>
+    </span>
+<br><br>
+    <span class="upx-slider-wrap">Gamma:
+        <button class="upx-step-minus" data-target="upx-gamma">-</button>
+        <input type="range" id="upx-gamma" value="100" min="40" max="250" style="width:80px;">
+        <input type="number" id="upx-gamma-num" value="100" min="40" max="250" style="width:44px;">
+        <button class="upx-step-plus" data-target="upx-gamma">+</button>
+    </span>
+<br><br>
+    <span class="upx-slider-wrap">Warmth:
+        <button class="upx-step-minus" data-target="upx-warmth">-</button>
+        <input type="range" id="upx-warmth" value="0" min="-100" max="100" style="width:80px;">
+        <input type="number" id="upx-warmth-num" value="0" min="-100" max="100" style="width:44px;">
+        <button class="upx-step-plus" data-target="upx-warmth">+</button>
+    </span>
+<br><br>
+    <span class="upx-slider-wrap">Vignette:
+        <button class="upx-step-minus" data-target="upx-vignette">-</button>
+        <input type="range" id="upx-vignette" value="0" min="0" max="250" style="width:80px;">
+        <input type="number" id="upx-vignette-num" value="0" min="0" max="250" style="width:44px;">
+        <button class="upx-step-plus" data-target="upx-vignette">+</button>
+    </span>
+</div>
+</details>
+
+<details class="upx-section" id="sec-panel">
+<summary>Panel &amp; profiles</summary>
+<div class="upx-section-body">
+    <label>Panel offset (px): <input type="number" id="upx-panel-offset-input" value="0" style="width:56px;"></label>
+<br><br>
+    <label>Profile: <select id="upx-profile-select"><option value="">(none)</option></select></label>
+    <button id="upx-profile-save-new">Save as new</button>
+    <button id="upx-profile-overwrite">Overwrite current</button>
+    <button id="upx-profile-load">Load</button>
+    <button id="upx-profile-delete">Delete</button>
+<br><br>
+    <button id="upx-profiles-download">Download all profiles (.txt)</button>
+    <button id="upx-profile-upload-btn">Upload profile file</button>
+    <input type="file" id="upx-profile-upload-input" accept=".txt,.json,text/plain,application/json" style="display:none;">
+</div>
+</details>
+
+<details class="upx-section" id="sec-backup">
+<summary>Backup &amp; restore (full localStorage)</summary>
+<div class="upx-section-body">
+    <button id="lsDumpBtn">Download localStorage (.txt)</button>
+    <button id="lsRestoreBtn">Upload &amp; restore localStorage</button>
+    <input type="file" id="lsRestoreInput" accept=".txt,.json,text/plain,application/json" style="display:none;">
+    <div style="margin-top:6px;font-size:11px;color:#666;">dumps every key on this page (server URLs, commands, profiles, clock position, etc.) as one JSON file; restoring overwrites matching keys and adds new ones, does not clear anything else first</div>
+</div>
+</details>
+
+<details class="upx-section" id="sec-keys">
+<summary>On-screen keys</summary>
+<div class="upx-section-body">
+    <label style="display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" id="keys-enable-cb"> Show keys overlay</label>
+    <label style="display:flex;align-items:center;gap:4px;cursor:pointer;margin-top:4px;"><input type="checkbox" id="keys-unlock-cb"> Unlock (drag to move)</label>
+    <div style="margin-top:4px;font-size:11px;color:#666;">tap a key to fire its down/up URLs; unlock to drag keys around, lock again when done -- positions save automatically</div>
+
+<br>
+    <input type="text" id="keys-search" placeholder="search..." style="width:90px;background:#fff;border:1px solid #bbb;color:#222;font-family:monospace;padding:6px 8px;border-radius:3px;font-size:13px;">
+
+<br><br>
+    <div style="font-weight:bold;">Add key</div>
+    <div class="row" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:4px;">
+        <label style="display:flex;flex-direction:column;gap:2px;color:#456;font-size:11px;">label
+            <input type="text" id="keys-add-label" style="width:70px;">
+        </label>
+        <label style="display:flex;flex-direction:column;gap:2px;color:#456;font-size:11px;">x
+            <input type="number" id="keys-add-x" value="100" style="width:60px;">
+        </label>
+        <label style="display:flex;flex-direction:column;gap:2px;color:#456;font-size:11px;">y
+            <input type="number" id="keys-add-y" value="100" style="width:60px;">
+        </label>
+        <label style="display:flex;flex-direction:column;gap:2px;color:#456;font-size:11px;">size
+            <input type="number" id="keys-add-size" value="90" style="width:60px;">
+        </label>
+        <label style="display:flex;flex-direction:column;gap:2px;color:#456;font-size:11px;">opacity
+            <input type="number" id="keys-add-opacity" value="0.35" step="0.05" min="0" max="1" style="width:60px;">
+        </label>
+        <label style="display:flex;flex-direction:column;gap:2px;color:#456;font-size:11px;">color
+            <input type="text" id="keys-add-color" value="#ffffff" style="width:80px;">
+        </label>
+    </div>
+    <div class="row" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:4px;">
+        <label style="display:flex;flex-direction:column;gap:2px;color:#456;font-size:11px;">base route (prefixed to both URLs below)
+            <input type="text" id="keys-add-base" placeholder="http://100.121.250.119:5000" style="width:220px;">
+        </label>
+    </div>
+    <div class="row" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:4px;">
+        <label style="display:flex;flex-direction:column;gap:2px;color:#456;font-size:11px;">down URL (appended to base)
+            <input type="text" id="keys-add-down" placeholder="/a/down" style="width:220px;">
+        </label>
+        <label style="display:flex;flex-direction:column;gap:2px;color:#456;font-size:11px;">up URL (appended to base)
+            <input type="text" id="keys-add-up" placeholder="/a/up" style="width:220px;">
+        </label>
+    </div>
+    <button id="keys-add-btn" style="margin-top:6px;">Add key</button>
+
+<br><br>
+    <div style="font-weight:bold;">Import (paste block format)</div>
+    <textarea id="keys-import-area" spellcheck="false" placeholder="x y&#10;label opacity size #color&#10;downURL&#10;upURL&#10;&#10;(blank line between keys)" style="width:100%;height:90px;resize:vertical;background:#fff;color:#222;border:1px solid #bbb;font-family:monospace;font-size:12px;padding:6px;box-sizing:border-box;white-space:pre;margin-top:4px;"></textarea>
+    <div class="row" style="display:flex;gap:6px;margin-top:4px;">
+        <button id="keys-import-btn">Import (add to current)</button>
+        <button id="keys-import-replace-btn" class="stop">Import (replace all)</button>
+        <span id="keys-import-msg" style="font-size:11px;"></span>
+    </div>
+
+<br>
+    <div class="row" style="display:flex;align-items:center;gap:8px;">
+        <div style="font-weight:bold;">Keys (<span id="keys-count">0</span>)</div>
+        <button id="keys-enable-all-btn" type="button" style="font-size:11px;padding:3px 8px;">Enable all</button>
+        <button id="keys-disable-all-btn" type="button" class="stop" style="font-size:11px;padding:3px 8px;">Disable all</button>
+    </div>
+    <div id="keys-list" style="display:flex;flex-direction:column;gap:2px;margin-top:4px;max-height:260px;overflow:auto;border:1px solid #ddd;background:#fff;padding:4px;"></div>
+
+<br>
+    <label>Profile: <select id="keys-profile-select"><option value="">(none)</option></select></label>
+    <button id="keys-profile-save-new">Save as new</button>
+    <button id="keys-profile-overwrite">Overwrite current</button>
+    <button id="keys-profile-load">Load</button>
+    <button id="keys-profile-delete" class="stop">Delete</button>
+<br><br>
+    <button id="keys-download-btn">Download keyset (.txt)</button>
+    <button id="keys-upload-btn">Upload keyset file</button>
+    <input type="file" id="keys-upload-input" accept=".txt,.json,text/plain,application/json" style="display:none;">
+</div>
+</details>
+</div>
+<div style="background:#dde; color:#114; font-family:monospace; font-size:13px; font-weight:bold; padding:6px 8px; border-top:2px solid #669;">▶ UPSCALED OUTPUT (enable checkbox above to activate)</div>
+<div id="upx-viewport" style="overflow:auto;max-width:100%;max-height:80vh;position:relative;background:#000;min-height:120px;border:2px solid #669;touch-action:none;">
+<style>
+#upx-viewport:fullscreen{max-width:none;max-height:none;width:100vw;height:100vh;display:flex;align-items:center;justify-content:center;overflow:hidden;}
+#upx-viewport:fullscreen #upx-canvas{max-width:100vw;max-height:100vh;width:auto!important;height:auto!important;object-fit:contain;}
+#upx-viewport:-webkit-full-screen{max-width:none;max-height:none;width:100vw;height:100vh;display:flex;align-items:center;justify-content:center;overflow:hidden;}
+#upx-viewport:-webkit-full-screen #upx-canvas{max-width:100vw;max-height:100vh;width:auto!important;height:auto!important;object-fit:contain;}
+#vWrap:fullscreen{width:100vw;height:100vh;display:flex;align-items:center;justify-content:center;background:#000;overflow:hidden;}
+#vWrap:fullscreen canvas{max-width:100vw;max-height:100vh;width:auto!important;height:auto!important;object-fit:contain;}
+#vWrap:-webkit-full-screen{width:100vw;height:100vh;display:flex;align-items:center;justify-content:center;background:#000;overflow:hidden;}
+#vWrap:-webkit-full-screen canvas{max-width:100vw;max-height:100vh;width:auto!important;height:auto!important;object-fit:contain;}
+</style>
+    <canvas id="upx-canvas" style="max-width:100%;height:auto;display:block;background:#000;"></canvas>
+    <div id="keysLayer" style="position:absolute;top:0;left:0;width:100%;height:100%;z-index:999998;display:none;pointer-events:none;"></div>
+</div>
+<div style="padding:6px 8px;">
+    <button id="upx-fullscreen-bottom" style="background:#e0efe0;border:1px solid #9c9;color:#132;font-family:monospace;padding:6px 12px;border-radius:3px;font-size:13px;cursor:pointer;">Upscale fullscreen</button>
+</div>
+
+
+<script>
+(function(){
+  const v = document.getElementById('v');
+  const statusEl = document.getElementById('status');
+  const qlenEl = document.getElementById('qlen');
+  const playedEl = document.getElementById('played');
+  const bytesRecvEl = document.getElementById('bytesRecv');
+  const logArea = document.getElementById('logArea');
+  const logSummary = document.getElementById('logSummary');
+  const btnLogDownload = document.getElementById('btnLogDownload');
+  const btnLogClear = document.getElementById('btnLogClear');
+  const btnLogToggle = document.getElementById('btnLogToggle');
+
+  if (typeof VideoDecoder === 'undefined') {
+    const msg = 'WebCodecs (VideoDecoder) is not supported in this browser -- playback cannot start.';
+    addLog(msg, 'bad');
+    setStatus(msg, 'bad');
+    throw new Error(msg);
+  }
+
+  const canvas = v;
+  const ctx = canvas.getContext('2d');
+
+  // ---- logging ----
+  // Full history (up to LOG_CAP) is kept in memory only -- addLog no longer
+  // writes into the DOM textarea on every call, since that was the perf
+  // hit (unbounded reflow on a growing <textarea> on every log line).
+  // logArea is populated from logLines just once, when the user opens it
+  // via "Show full log". A separate 3-line #logSummary is kept cheaply
+  // updated instead, for glanceable status without touching the big DOM.
+  let logLines = [];
+  const LOG_CAP = 5000;
+  let logAreaOpen = false;
+
+  // The "important stuff" lines, updated in place (not appended).
+  let summaryBytesRecv = '0';
+  let summaryBufferStatus = 'ws byte buffer: idle';
+  let summarySourceStatus = 'source: unknown (not checked yet)';
+  let summaryLast = '(no events yet)';
+  function renderSummary() {
+    logSummary.textContent =
+      'bytes received: ' + summaryBytesRecv + '\n' +
+      summaryBufferStatus + '\n' +
+      summarySourceStatus + '\n' +
+      'last: ' + summaryLast;
+  }
+  renderSummary();
+
+  function addLog(text, cls) {
+    const line = '[' + new Date().toISOString().split('T')[1].replace('Z','') + '] ' + text;
+    logLines.push(line);
+    if (logLines.length > LOG_CAP) logLines.shift();
+    summaryLast = line;
+    renderSummary();
+    if (logAreaOpen) {
+      logArea.value += line + '\n';
+      logArea.scrollTop = logArea.scrollHeight;
+    }
+  }
+  function setStatus(text, cls) {
+    statusEl.textContent = text;
+    statusEl.className = cls || '';
+    addLog(text, cls);
+  }
+  btnLogClear.addEventListener('click', () => {
+    logLines.length = 0;
+    logArea.value = '';
+    summaryLast = '(cleared)';
+    renderSummary();
+  });
+  btnLogToggle.addEventListener('click', () => {
+    logAreaOpen = !logAreaOpen;
+    if (logAreaOpen) {
+      logArea.value = logLines.join('\n') + '\n';
+      logArea.scrollTop = logArea.scrollHeight;
+      logArea.style.display = '';
+      btnLogToggle.textContent = 'Hide full log';
+    } else {
+      logArea.style.display = 'none';
+      btnLogToggle.textContent = 'Show full log';
+    }
+  });
+  btnLogDownload.addEventListener('click', () => {
+    const blob = new Blob([logLines.join('\n')], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'ffstream-log-' + Date.now() + '.txt';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+
+  // ---- WebCodecs playback pipeline ----
+  // Single continuous stream, not discrete segment files: one long-lived
+  // MP4Box instance that bytes get appended to as they arrive over the WS.
+  // moov (with empty_moov, essentially just ftyp+moov box headers) shows up
+  // once at the very start of the ffmpeg output; every keyframe interval
+  // after that is a moof+mdat pair, appended into the SAME MP4Box instance
+  // via appendBuffer() rather than parsed as a standalone file each time.
+  // This runs on the main thread (no demux worker) -- see conversation
+  // notes: a worker made sense for zwc.html's one-full-file-parse-per-
+  // segment model, but here each appendBuffer() call is cheap (the header
+  // was already parsed once), so there's no per-chunk stall worth moving
+  // off-thread for a v1.
+  let decoder = null;
+  let decoderConfigured = false;
+  const frameQueue = [];
+  let started = false;
+  // Startup gate is time-based (startDelayMs directly), not frame-count
+  // based -- frame count only makes sense once you know fps, which for a
+  // live gdigrab capture isn't reliable up front. firstFrameArrivalTime is
+  // set the moment the FIRST decoded frame lands in the queue, and
+  // playback starts once startDelayMs has elapsed since then (giving the
+  // queue time to build a cushion) rather than waiting for an assumed
+  // frame count.
+  let firstFrameArrivalTime = null;
+  let playedCount = 0;
+  let bytesRecvTotal = 0;
+
+  // ---- presentation-timestamp-paced playback ----
+  // The earlier version paced painting off a synthetic fixed clock
+  // (paintStartTime + frameCount * assumedIntervalMs), completely decoupled
+  // from when frames actually decode. Any hiccup in network/decode timing
+  // caused the queue to run dry against that fixed schedule (a visible
+  // hold), then refill in a burst that got drained too fast relative to
+  // it -- textbook stutter. Real players avoid this by pacing against each
+  // frame's own presentation timestamp (frame.timestamp, in microseconds,
+  // carried through from the EncodedVideoChunk's timestamp) rather than a
+  // guessed constant frame rate. mediaStartPtsUs/wallClockStartMs anchor
+  // "frame at PTS X should be painted X-after-the-first-frame's-PTS,
+  // measured in real wall-clock time" -- this self-corrects for whatever
+  // the actual capture cadence is, including jitter, without needing fps
+  // to be known or constant.
+  let mediaStartPtsUs = null;   // PTS (us) of the first frame ever painted
+  let wallClockStartMs = null;  // performance.now() at the moment that first frame was painted
+
+  const mp4box = MP4Box.createFile();
+  let fileStartOffset = 0; // running byte offset -- required by mp4box for incremental appendBuffer calls
+  let trackId = null;
+  let mp4boxStarted = false;
+
+  mp4box.onError = (err) => {
+    addLog('mp4box error: ' + err, 'bad');
+  };
+
+  mp4box.onReady = (info) => {
+    const track = info.videoTracks[0];
+    if (!track) {
+      addLog('mp4box onReady: no video track', 'bad');
+      return;
+    }
+    trackId = track.id;
+    const trak = mp4box.getTrackById(track.id);
+    const entry = trak.mdia.minf.stbl.stsd.entries[0];
+    const isAv1 = track.codec.startsWith('av01');
+    let description;
+    if (!isAv1) {
+      const box = entry.avcC || entry.hvcC;
+      if (!box) {
+        addLog('mp4box onReady: no avcC/hvcC box, entry type=' + entry.type, 'bad');
+        return;
+      }
+      const stream = new DataStream(undefined, 0, DataStream.BIG_ENDIAN);
+      box.write(stream);
+      description = new Uint8Array(stream.buffer, 8);
+    }
+
+    decoder = new VideoDecoder({
+      output: (frame) => {
+        if (firstFrameArrivalTime === null) firstFrameArrivalTime = performance.now();
+        frameQueue.push(frame);
+      },
+      error: (err) => addLog('decoder ERROR: ' + err.message, 'bad')
+    });
+    decoder.configure({
+      codec: track.codec,
+      codedWidth: track.video.width,
+      codedHeight: track.video.height,
+      description
+    });
+    decoderConfigured = true;
+    canvas.width = track.video.width;
+    canvas.height = track.video.height;
+
+    addLog('decoder configured, codec=' + track.codec + ' ' + track.video.width + 'x' + track.video.height, 'ok');
+
+    mp4box.setExtractionOptions(track.id, null, { nbSamples: Infinity });
+    mp4box.start();
+    mp4boxStarted = true;
+  };
+
+  mp4box.onSamples = (track_id, ref, samples) => {
+    const _t0 = performance.now();
+    for (const sample of samples) {
+      const chunkData = sample.data.buffer.slice(
+        sample.data.byteOffset, sample.data.byteOffset + sample.data.byteLength
+      );
+      try {
+        const _d0 = performance.now();
+        decoder.decode(new EncodedVideoChunk({
+          type: sample.is_sync ? 'key' : 'delta',
+          timestamp: (sample.cts * 1_000_000) / sample.timescale,
+          duration: (sample.duration * 1_000_000) / sample.timescale,
+          data: chunkData
+        }));
+        const _dMs = performance.now() - _d0;
+        if (_dMs > 100) addLog('decode() call took ' + _dMs.toFixed(0) + 'ms (sync='+sample.is_sync+')', 'warn');
+      } catch (e) {
+        addLog('decode() threw: ' + e.message, 'bad');
+      }
+    }
+    const _totalMs = performance.now() - _t0;
+    if (_totalMs > 100) addLog('onSamples batch (' + samples.length + ' samples) took ' + _totalMs.toFixed(0) + 'ms', 'warn');
+  };
+
+  function feedBytes(arrayBuffer) {
+    arrayBuffer.fileStart = fileStartOffset;
+    fileStartOffset += arrayBuffer.byteLength;
+    try {
+      const _a0 = performance.now();
+      mp4box.appendBuffer(arrayBuffer);
+      const _aMs = performance.now() - _a0;
+      if (_aMs > 100) addLog('appendBuffer took ' + _aMs.toFixed(0) + 'ms (fileStart=' + arrayBuffer.fileStart + ')', 'warn');
+    } catch (e) {
+      addLog('appendBuffer threw: ' + e.message, 'bad');
+    }
+  }
+
+  function paintLoop() {
+    if (!started) {
+      const startDelayMs = Math.max(0, parseInt(document.getElementById('startDelayMs').value, 10) || 0);
+      if (firstFrameArrivalTime !== null && performance.now() - firstFrameArrivalTime >= startDelayMs) {
+        started = true;
+        setStatus('playback started', 'ok');
+      } else {
+        requestAnimationFrame(paintLoop);
+        return;
+      }
+    }
+
+    // Last-resort drop if decode has raced far ahead of paint (e.g. tab
+    // was backgrounded). At steady state this never gets close to 300 --
+    // it's purely a memory-bound safety valve, unrelated to the speed-ramp
+    // catch-up logic below.
+    while (frameQueue.length > 300) {
+      frameQueue.shift().close();
+    }
+
+    // Pace against each frame's own PTS rather than a fixed/guessed
+    // interval, but scale playback speed based on queue depth so that
+    // *steadily* falling behind (not just one-off bursts) gets continuously
+    // corrected instead of producing a single skip-ahead that just refills
+    // right after. The bigger the backlog, the faster we play through it;
+    // once it drains back down, speed eases back to normal. This burns
+    // through backlog by watching frames slightly faster rather than
+    // jumping/dropping, so it stays smooth instead of visibly hitching.
+    if (frameQueue.length > 0) {
+      const next = frameQueue[0];
+      if (mediaStartPtsUs === null) {
+        mediaStartPtsUs = next.timestamp;
+        wallClockStartMs = performance.now();
+      }
+
+      // Speed ramps: under 10 queued, play normal. 10-40, ramp linearly up
+      // to 1.5x. Above 40, cap at 1.5x (any faster starts looking choppy
+      // rather than just "brisk"). Tune these numbers against what you see
+      // in qlen during testing.
+      const qlen = frameQueue.length;
+      const RAMP_START = 10;
+      const RAMP_END = 40;
+      const MAX_SPEED = 1.5;
+      let speed = 1.0;
+      if (qlen > RAMP_START) {
+        const t = Math.min(1, (qlen - RAMP_START) / (RAMP_END - RAMP_START));
+        speed = 1.0 + t * (MAX_SPEED - 1.0);
+      }
+
+      // targetWallClockMs is computed the same way as before (anchor +
+      // PTS offset), but we advance the anchor each tick by
+      // (elapsed * speed) instead of leaving it fixed -- effectively
+      // playing the PTS clock faster than real time while catching up.
+      const nowMs = performance.now();
+      const targetWallClockMs = wallClockStartMs + (next.timestamp - mediaStartPtsUs) / 1000;
+      if (nowMs >= targetWallClockMs) {
+        frameQueue.shift();
+        ctx.drawImage(next, 0, 0, canvas.width, canvas.height);
+        next.close();
+        playedCount++;
+        playedEl.textContent = playedCount;
+        qlenEl.textContent = frameQueue.length;
+      } else if (speed > 1.0) {
+        // Behind schedule: pull the anchor forward by the extra fraction of
+        // this tick's elapsed time, so targetWallClockMs for the *next*
+        // frame arrives sooner -- i.e. we're consuming PTS faster than 1:1.
+        const dtMs = nowMs - (paintLoop._lastTick || nowMs);
+        wallClockStartMs -= dtMs * (speed - 1.0);
+      }
+      paintLoop._lastTick = nowMs;
+      // else: not this frame's time yet and queue isn't deep -- hold the
+      // current picture and check again next rAF tick.
+    }
+
+    requestAnimationFrame(paintLoop);
+  }
+  paintLoop();
+
+  // ---- single WebSocket connection, raw bytes straight into MP4Box ----
+  // Same generation-counter pattern as zwc.html: guards against a duplicate
+  // connect() ever running two live sockets at once. The SERVER also
+  // enforces one-client-only (evicts on new connection), so this is a
+  // belt-and-suspenders client-side guard, not the primary mechanism.
+  let activeWs = null;
+  let connectGeneration = 0;
+
+  // ---- simple in-memory buffer: WS just pushes here, a drain loop feeds
+  // mp4box separately, so a momentary decode/parse stall doesn't block the
+  // WS callback -- it just piles up here and drains naturally once whatever
+  // was slow catches up. ----
+  const wsByteBuffer = [];
+  let lastReportedBufDepth = -1;
+  function drainWsByteBuffer() {
+    while (wsByteBuffer.length > 0) {
+      feedBytes(wsByteBuffer.shift());
+    }
+    if (lastReportedBufDepth !== 0) {
+      summaryBufferStatus = 'ws byte buffer: 0 pending (drained ok)';
+      renderSummary();
+      lastReportedBufDepth = 0;
+    }
+    requestAnimationFrame(drainWsByteBuffer);
+  }
+  drainWsByteBuffer();
+
+  function connect() {
+    if (activeWs) {
+      const old = activeWs;
+      activeWs = null;
+      old.onclose = null;
+      old.onerror = null;
+      old.onmessage = null;
+      try { old.close(); } catch (e) {}
+    }
+
+    const myGeneration = ++connectGeneration;
+    const host = wsHostInput.value.trim() || location.host;
+    const ws = new WebSocket('ws://' + host + '/');
+    ws.binaryType = 'arraybuffer';
+    activeWs = ws;
+
+    ws.onopen = () => {
+      if (myGeneration !== connectGeneration) return;
+      setStatus('connected, waiting for stream...', 'ok');
+    };
+
+    ws.onmessage = (ev) => {
+      if (myGeneration !== connectGeneration) return;
+      const arrayBuffer = ev.data;
+      if (!arrayBuffer.byteLength) return;
+      bytesRecvTotal += arrayBuffer.byteLength;
+      bytesRecvEl.textContent = bytesRecvTotal;
+      summaryBytesRecv = String(bytesRecvTotal);
+      wsByteBuffer.push(arrayBuffer);
+      if (wsByteBuffer.length > 1) {
+        summaryBufferStatus = 'ws byte buffer: ' + wsByteBuffer.length + ' pending';
+      }
+      renderSummary();
+    };
+
+    ws.onclose = () => {
+      if (myGeneration !== connectGeneration) return;
+      activeWs = null;
+      setStatus('disconnected, retrying in 1s...', 'warn');
+      setTimeout(connect, 1000);
+    };
+    ws.onerror = () => {
+      setStatus('websocket error', 'bad');
+    };
+  }
+
+  const WS_HOST_KEY = 'ffstream_wsHost';
+  const wsHostInput = document.getElementById('wsHost');
+  wsHostInput.value = localStorage.getItem(WS_HOST_KEY) || '100.121.250.119:7600';
+  document.getElementById('wsConnectBtn').addEventListener('click', () => {
+    localStorage.setItem(WS_HOST_KEY, wsHostInput.value.trim());
+    connect();
+  });
+  connect();
+
+  const START_DELAY_KEY = 'ffstream_startDelayMs';
+  const startDelayMsInput = document.getElementById('startDelayMs');
+  const savedStartDelayMs = localStorage.getItem(START_DELAY_KEY);
+  if (savedStartDelayMs !== null) startDelayMsInput.value = savedStartDelayMs;
+  startDelayMsInput.addEventListener('change', () => {
+    localStorage.setItem(START_DELAY_KEY, startDelayMsInput.value);
+  });
+
+  // ---- ffmpeg start/stop/restart controls ----
+  const ffCmdInput = document.getElementById('ffCmd');
+  const ctrlMsg = document.getElementById('ctrlMsg');
+  const FF_CMD_KEY = 'ffstream_cmd';
+  const savedCmd = localStorage.getItem(FF_CMD_KEY);
+  if (savedCmd) ffCmdInput.value = savedCmd;
+
+  async function postControl(path, body) {
+    const host = wsHostInput.value.trim() || location.host;
+    ctrlMsg.textContent = '...';
+    try {
+      const res = await fetch('http://' + host + path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body || {})
+      });
+      const data = await res.json();
+      ctrlMsg.textContent = res.ok ? (data.message || 'ok') : ('error: ' + (data.error || res.status));
+      addLog(path + ' -> ' + (data.message || data.error || res.status));
+    } catch (e) {
+      ctrlMsg.textContent = 'request failed: ' + e.message;
+      addLog(path + ' failed: ' + e.message, 'bad');
+    }
+    setTimeout(() => { ctrlMsg.textContent = ''; }, 4000);
+  }
+
+  document.getElementById('btnStart').addEventListener('click', () => {
+    const cmd = ffCmdInput.value.trim();
+    localStorage.setItem(FF_CMD_KEY, cmd);
+    postControl('/control/start', { cmd });
+  });
+  document.getElementById('btnStop').addEventListener('click', () => {
+    postControl('/control/stop', {});
+  });
+  document.getElementById('btnRestart').addEventListener('click', () => {
+    const cmd = ffCmdInput.value.trim();
+    localStorage.setItem(FF_CMD_KEY, cmd);
+    postControl('/control/restart', { cmd });
+  });
+
+  // ---- process-supervisor "source" controls (separate server, separate
+  // panel from the ffmpeg /control/* one above -- that one is untouched).
+  // Talks to a node-ws-style process-supervisor server (proc/new,
+  // proc/:id/start, proc/:id/stop -- same API shape as procmgr.html).
+  // Server URL, source command, and restart delay are all configurable
+  // and persisted to localStorage like everything else on this page. ----
+  const SRC_API_KEY = 'ffstream_srcApiUrl';
+  const SRC_CMD_KEY = 'ffstream_srcCmd';
+  const SRC_RESTART_DELAY_KEY = 'ffstream_srcRestartDelayMs';
+  const SRC_API_HEADERS = { 'ngrok-skip-browser-warning': 'true' };
+
+  const srcApiUrlInput = document.getElementById('srcApiUrl');
+  const srcCmdInput = document.getElementById('srcCmdInput');
+  const srcRestartDelayInput = document.getElementById('srcRestartDelayMs');
+  const srcCtrlMsg = document.getElementById('srcCtrlMsg');
+
+  srcApiUrlInput.value = localStorage.getItem(SRC_API_KEY) || 'https://roselyn-nonfeeble-vanessa.ngrok-free.dev';
+  srcApiUrlInput.addEventListener('change', () => {
+    localStorage.setItem(SRC_API_KEY, srcApiUrlInput.value.trim().replace(/\/$/, ''));
+  });
+
+  srcCmdInput.value = localStorage.getItem(SRC_CMD_KEY) || 'node zw';
+  srcCmdInput.addEventListener('change', () => {
+    localStorage.setItem(SRC_CMD_KEY, srcCmdInput.value.trim());
+  });
+  function srcCmd() {
+    return srcCmdInput.value.trim();
+  }
+
+  srcRestartDelayInput.value = localStorage.getItem(SRC_RESTART_DELAY_KEY) || '2000';
+  srcRestartDelayInput.addEventListener('change', () => {
+    localStorage.setItem(SRC_RESTART_DELAY_KEY, srcRestartDelayInput.value);
+  });
+
+  function srcApiBase() {
+    return srcApiUrlInput.value.trim().replace(/\/$/, '');
+  }
+
+  function setSrcMsg(text) {
+    srcCtrlMsg.textContent = text;
+    addLog('[source] ' + text);
+    setTimeout(() => { if (srcCtrlMsg.textContent === text) srcCtrlMsg.textContent = ''; }, 4000);
+  }
+
+  // Looks up the process by command each time via /proc/list, same as
+  // procmgr.html does -- no cached id in localStorage, so it always
+  // reflects whatever the server actually has right now.
+  async function srcFindProc() {
+    const base = srcApiBase();
+    const r = await fetch(base + '/proc/list', { headers: SRC_API_HEADERS });
+    if (!r.ok) throw new Error('list failed: ' + r.status);
+    const list = await r.json();
+    return list.find((p) => p.command === srcCmd()) || null;
+  }
+
+  // Re-polls /proc/list after an action and reports what the server
+  // actually says -- status/pid, not just "the POST returned 200". This
+  // is the confirmation step: a 200 from /start only means the request was
+  // accepted, not that the process is actually up.
+  async function srcConfirmStatus(actionLabel) {
+    try {
+      const proc = await srcFindProc();
+      if (!proc) {
+        summarySourceStatus = 'source: not found on server';
+        setSrcMsg(actionLabel + ' -- confirmed: not found on server');
+        return null;
+      }
+      if (proc.status === 'running') {
+        summarySourceStatus = 'source: running (pid ' + proc.pid + ')';
+        setSrcMsg(actionLabel + ' -- confirmed: running, pid ' + proc.pid);
+      } else if (proc.status === 'crashed') {
+        let detail = 'crashed';
+        if (proc.lastExitCode !== null && proc.lastExitCode !== undefined) detail += ' (exit code ' + proc.lastExitCode + ')';
+        if (proc.spawnError) detail += ' — ' + proc.spawnError;
+        summarySourceStatus = 'source: ' + detail;
+        setSrcMsg(actionLabel + ' -- confirmed: ' + detail);
+      } else {
+        summarySourceStatus = 'source: stopped';
+        setSrcMsg(actionLabel + ' -- confirmed: stopped');
+      }
+      renderSummary();
+      return proc;
+    } catch (e) {
+      summarySourceStatus = 'source: could not confirm (' + e.message + ')';
+      renderSummary();
+      setSrcMsg(actionLabel + ' -- could not confirm status: ' + e.message);
+      return null;
+    }
+  }
+
+  async function srcStart() {
+    const base = srcApiBase();
+    if (!base) { setSrcMsg('set a server URL first'); return; }
+    setSrcMsg('starting...');
+    try {
+      const existing = await srcFindProc();
+      if (existing) {
+        const r = await fetch(base + '/proc/' + existing.id + '/start', { method: 'POST', headers: SRC_API_HEADERS });
+        const data = await r.json();
+        if (data.startError) { setSrcMsg('failed to start: ' + data.startError); return; }
+      } else {
+        const r = await fetch(base + '/proc/new', {
+          method: 'POST',
+          headers: { ...SRC_API_HEADERS, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: 'source', command: srcCmd() })
+        });
+        const data = await r.json();
+        if (data.startError) { setSrcMsg('failed to start: ' + data.startError); return; }
+      }
+      // give the process a moment to actually come up before checking
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      await srcConfirmStatus('start');
+    } catch (e) {
+      setSrcMsg('request failed: ' + e.message);
+    }
+  }
+
+  async function srcStop() {
+    const base = srcApiBase();
+    if (!base) { setSrcMsg('set a server URL first'); return; }
+    setSrcMsg('stopping...');
+    try {
+      const existing = await srcFindProc();
+      if (!existing) { setSrcMsg('nothing to stop (source not found)'); return; }
+      await fetch(base + '/proc/' + existing.id + '/stop', { method: 'POST', headers: SRC_API_HEADERS });
+      // stop() returns immediately after SIGTERM; give the exit event a
+      // moment to land before confirming, same as procmgr.html does
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      await srcConfirmStatus('stop');
+    } catch (e) {
+      setSrcMsg('request failed: ' + e.message);
+    }
+  }
+
+  async function srcRestart() {
+    const delayMs = Math.max(0, parseInt(srcRestartDelayInput.value, 10) || 0);
+    setSrcMsg('restarting (stop, wait ' + delayMs + 'ms, start)...');
+    await srcStop();
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    await srcStart();
+  }
+
+  document.getElementById('btnSrcStart').addEventListener('click', srcStart);
+  document.getElementById('btnSrcStop').addEventListener('click', srcStop);
+  document.getElementById('btnSrcRestart').addEventListener('click', srcRestart);
+
+  // ---- fullscreen button ----
+  // Targets #vWrap (a div wrapping the canvas), not the canvas element
+  // directly -- canvases can't render DOM children, so anything we want
+  // floating over the video in fullscreen (the draggable clock) has to
+  // live in an element that can actually host children. CSS below makes
+  // the canvas fill the wrapper the same way it filled the viewport
+  // before, so this is visually identical to fullscreening the canvas.
+  const vWrap = document.getElementById('vWrap');
+  document.getElementById('fullscreenBtn').addEventListener('click', () => {
+    if (vWrap.requestFullscreen) {
+      vWrap.requestFullscreen().catch((e) => addLog('fullscreen request failed: ' + e.message, 'warn'));
+    } else if (vWrap.webkitRequestFullscreen) {
+      vWrap.webkitRequestFullscreen();
+    } else {
+      addLog('fullscreen not supported in this browser', 'warn');
+    }
+  });
+
+  // ---- saved profiles (start delay + ffmpeg command) ----
+  // Stored as a JSON array under its own localStorage key, separate from
+  // the existing ffstream_wsHost/ffstream_cmd "last used" keys above --
+  // those two continue to work exactly as before (whatever was last typed/
+  // started persists on reload regardless of profiles). Profiles are a
+  // strictly additive layer: selecting one just fills in the existing
+  // #ffCmd textarea and #startDelayMs field, same as if you'd typed them
+  // yourself -- it does not auto-start ffmpeg or touch the WS/host fields.
+  const PROFILES_KEY = 'ffstream_profiles';
+  const profileSelect = document.getElementById('profileSelect');
+  const profileNameInput = document.getElementById('profileNameInput');
+  const startDelayInput = document.getElementById('startDelayMs');
+
+  function loadProfiles() {
+    try {
+      const raw = localStorage.getItem(PROFILES_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      addLog('profiles: failed to parse stored profiles, resetting: ' + e.message, 'warn');
+      return [];
+    }
+  }
+
+  function saveProfiles(profiles) {
+    localStorage.setItem(PROFILES_KEY, JSON.stringify(profiles));
+  }
+
+  function renderProfileOptions() {
+    const profiles = loadProfiles();
+    const prevSelected = profileSelect.value;
+    profileSelect.innerHTML = '<option value="">-- select --</option>';
+    for (const p of profiles) {
+      const opt = document.createElement('option');
+      opt.value = p.name;
+      opt.textContent = p.name;
+      profileSelect.appendChild(opt);
+    }
+    // Keep the previous selection if it still exists (e.g. after a delete
+    // of a *different* profile), otherwise fall back to the placeholder.
+    if (profiles.some(p => p.name === prevSelected)) {
+      profileSelect.value = prevSelected;
+    }
+  }
+  renderProfileOptions();
+
+  profileSelect.addEventListener('change', () => {
+    const name = profileSelect.value;
+    if (!name) return;
+    const profiles = loadProfiles();
+    const match = profiles.find(p => p.name === name);
+    if (!match) return;
+    ffCmdInput.value = match.cmd;
+    startDelayInput.value = match.startDelayMs;
+    profileNameInput.value = match.name;
+    localStorage.setItem(FF_CMD_KEY, match.cmd); // keep "last used" in sync too
+    addLog('profile "' + name + '" loaded', 'ok');
+  });
+
+  document.getElementById('btnProfileSave').addEventListener('click', () => {
+    const name = profileNameInput.value.trim();
+    if (!name) { addLog('profile save: enter a name first', 'warn'); return; }
+    const profiles = loadProfiles();
+    const entry = {
+      name,
+      cmd: ffCmdInput.value,
+      startDelayMs: Math.max(0, parseInt(startDelayInput.value, 10) || 0)
+    };
+    const idx = profiles.findIndex(p => p.name === name);
+    if (idx >= 0) profiles[idx] = entry; else profiles.push(entry);
+    saveProfiles(profiles);
+    renderProfileOptions();
+    profileSelect.value = name;
+    addLog('profile "' + name + '" saved', 'ok');
+  });
+
+  document.getElementById('btnProfileDelete').addEventListener('click', () => {
+    const name = profileSelect.value || profileNameInput.value.trim();
+    if (!name) { addLog('profile delete: no profile selected', 'warn'); return; }
+    let profiles = loadProfiles();
+    const existed = profiles.some(p => p.name === name);
+    profiles = profiles.filter(p => p.name !== name);
+    saveProfiles(profiles);
+    renderProfileOptions();
+    if (existed) addLog('profile "' + name + '" deleted', 'ok');
+    else addLog('profile "' + name + '" not found', 'warn');
+  });
+
+})();
+</script>
+
+<script>
+(function() {
+// ============================================================================
+// UPSCALER OVERLAY -- ported from the distance-buffer reference player.
+// Reads #canvas (the SAME element the main paint loop above draws decoded
+// VideoFrames into via ctx.drawImage) as its WebGL texture source, on its
+// own independent requestAnimationFrame loop. It never writes to #canvas,
+// never touches decoder/decodeSegment/paintLoop/main(), and does not touch
+// the #previewVideo cheap-preview element at all -- that panel is left
+// exactly as-is, unupscaled, per spec.
+// ============================================================================
+
+const glCanvas = document.getElementById("upx-canvas");
+const viewport = document.getElementById("upx-viewport");
+const toggleCb = document.getElementById("upx-toggle-cb");
+const togglePersistCb = document.getElementById("upx-toggle-persist-cb");
+const kernelSel = document.getElementById("upx-kernel");
+const scaleInput = document.getElementById("upx-scale");
+const sharpInput = document.getElementById("upx-sharp");
+const casInput = document.getElementById("upx-cas");
+const antiRingInput = document.getElementById("upx-antiring");
+const brightInput = document.getElementById("upx-bright");
+const contrastInput = document.getElementById("upx-contrast");
+const saturateInput = document.getElementById("upx-saturate");
+const hueInput = document.getElementById("upx-hue");
+const gammaInput = document.getElementById("upx-gamma");
+const warmthInput = document.getElementById("upx-warmth");
+const vignetteInput = document.getElementById("upx-vignette");
+const resEl = document.getElementById("upx-res");
+
+let active = false;
+let kernel = "catmullrom";
+let scaleMult = 2;
+let sharpAmt = 0.35;
+let casAmt = 0.0;
+let antiRingAmt = 0.0;
+let brightAmt = 1.0;
+let contrastAmt = 1.0;
+let saturateAmt = 1.0;
+let hueAmt = 0.0;
+let gammaAmt = 1.0;
+let warmthAmt = 0.0;
+let vignetteAmt = 0.0;
+let userZoom = 1.0;
+let tapRadius = 2;
+let detailWin = 2;
+let detailAmt = 0.0;
+
+let gl = null, program = null, texture = null;
+let uLoc = {};
+let glReady = false;
+
+function initGL() {
+    try {
+        gl = glCanvas.getContext("webgl", { alpha: false, antialias: true, powerPreference: "high-performance", preserveDrawingBuffer: false })
+            || glCanvas.getContext("experimental-webgl", { alpha: false, antialias: true, powerPreference: "high-performance" });
+        if (!gl) { resEl.textContent = "WebGL unavailable"; return; }
+
+        const vsSrc = `
+            attribute vec2 aPos;
+            varying vec2 vUv;
+            void main(){
+                vUv=(aPos+1.0)*0.5;
+                vUv.y=1.0-vUv.y;
+                gl_Position=vec4(aPos,0.0,1.0);
+            }
+        `;
+
+        // Same resampler as the reference: Catmull-Rom / Lanczos2 (4x4 taps)
+        // or Lanczos3 (6x6 taps) / FSR (EASU+RCAS), plus unsharp-mask, CAS,
+        // anti-ring, and full color grading (bright/contrast/saturate/hue/
+        // gamma/warmth/vignette) -- ported verbatim from the reference.
+        const fsSrc = `
+            precision highp float;
+            varying vec2 vUv;
+            uniform sampler2D uTex;
+            uniform vec2 uSrcSize;
+            uniform int uKernel; // 0 catmullrom, 1 lanczos2, 2 lanczos3, 3 fsr(easu+rcas), 4 detailrecover
+            uniform float uTapRadius; // configurable NxN window radius for kernels 0-2, fractional (1.0..20.0, step 0.1)
+            uniform int uDetailWin; // half-window size for structure-tensor gradient estimate (1..20)
+            uniform float uDetail; // detail-recover strength, unclamped (UI allows up to 10.0)
+            uniform float uSharp;
+            uniform float uCas;
+            uniform float uAntiRing;
+            uniform float uContrast;
+            uniform float uSaturate;
+            uniform float uBright;
+            uniform float uGamma;
+            uniform float uWarmth;
+            uniform float uHue;
+            uniform float uVignette;
+
+            const float PI=3.14159265359;
+
+            float sinc(float x){
+                if(abs(x)<0.0001)return 1.0;
+                float px=PI*x;
+                return sin(px)/px;
+            }
+
+            float crWeight(float x){
+                x=abs(x);
+                float a=-0.5;
+                if(x<1.0)return (a+2.0)*x*x*x-(a+3.0)*x*x+1.0;
+                if(x<2.0)return a*x*x*x-5.0*a*x*x+8.0*a*x-4.0*a;
+                return 0.0;
+            }
+
+            float lanczosWeight(float x,float a){
+                x=abs(x);
+                if(x>a)return 0.0;
+                return sinc(x)*sinc(x/a);
+            }
+
+            vec3 sampleAt(vec2 texel){
+                return texture2D(uTex,texel/uSrcSize).rgb;
+            }
+
+            vec3 resample(){
+                vec2 srcCoord=vUv*uSrcSize;
+                vec2 center=floor(srcCoord-0.5)+0.5;
+                vec2 frac=srcCoord-center;
+
+                float radiusF=2.0;
+                float lanczA=2.0;
+                if(uKernel==2){radiusF=3.0;lanczA=3.0;}
+                if(uKernel==0||uKernel==1||uKernel==2){
+                    radiusF=uTapRadius;
+                    lanczA=uTapRadius;
+                }
+                // Integer loop-bound: ceil of the fractional radius, so a tap
+                // radius like 2.3 still visits the full ring of integer taps
+                // at distance 3 (needed for the sub-integer interpolated edge
+                // handled by the wx/wy falloff below rather than by pretending
+                // the window is smaller than requested).
+                int radius=int(ceil(radiusF));
+
+                vec3 colorSum=vec3(0.0);
+                float wSum=0.0;
+                vec3 tapMin=vec3(1.0);
+                vec3 tapMax=vec3(0.0);
+
+                // GLSL ES 1.00 requires compile-time constant loop bounds, so the
+                // outer loop always runs the max supported window (-20..20, i.e.
+                // up to a 41x41 tap area) and the inner radius check skips taps
+                // outside whatever uTapRadius actually asked for.
+                for(int j=-20;j<=20;j++){
+                    if(j<-radius+1||j>radius)continue;
+                    float wy;
+                    float dy=float(j)-frac.y;
+                    if(uKernel==0) wy=crWeight(dy);
+                    else wy=lanczosWeight(dy,lanczA);
+
+                    for(int i=-20;i<=20;i++){
+                        if(i<-radius+1||i>radius)continue;
+                        float wx;
+                        float dx=float(i)-frac.x;
+                        if(uKernel==0) wx=crWeight(dx);
+                        else wx=lanczosWeight(dx,lanczA);
+
+                        float w=wx*wy;
+                        vec2 tap=center+vec2(float(i),float(j));
+                        tap=clamp(tap,vec2(0.5),uSrcSize-vec2(0.5));
+                        vec3 s=sampleAt(tap);
+                        colorSum+=s*w;
+                        wSum+=w;
+                        if(i>=-1&&i<=1&&j>=-1&&j<=1){
+                            tapMin=min(tapMin,s);
+                            tapMax=max(tapMax,s);
+                        }
+                    }
+                }
+                vec3 result=wSum>0.0001?colorSum/wSum:texture2D(uTex,vUv).rgb;
+                if(uAntiRing>0.001){
+                    vec3 clamped=clamp(result,tapMin,tapMax);
+                    result=mix(result,clamped,uAntiRing);
+                }
+                return result;
+            }
+
+            // ---- FSR1-style EASU (Edge Adaptive Spatial Upsampling) ----
+            vec3 easuSample(){
+                vec2 srcCoord=vUv*uSrcSize-0.5;
+                vec2 base=floor(srcCoord);
+                vec2 f=srcCoord-base;
+                vec2 texel=1.0/uSrcSize;
+
+                vec3 c00=texture2D(uTex,(base+vec2(0.0,0.0)+0.5)*texel).rgb;
+                vec3 c10=texture2D(uTex,(base+vec2(1.0,0.0)+0.5)*texel).rgb;
+                vec3 c01=texture2D(uTex,(base+vec2(0.0,1.0)+0.5)*texel).rgb;
+                vec3 c11=texture2D(uTex,(base+vec2(1.0,1.0)+0.5)*texel).rgb;
+
+                vec3 cN =texture2D(uTex,(base+vec2(0.5,-0.5))*texel).rgb;
+                vec3 cS =texture2D(uTex,(base+vec2(0.5, 1.5))*texel).rgb;
+                vec3 cW =texture2D(uTex,(base+vec2(-0.5,0.5))*texel).rgb;
+                vec3 cE =texture2D(uTex,(base+vec2(1.5, 0.5))*texel).rgb;
+
+                float lN=dot(cN,vec3(0.299,0.587,0.114));
+                float lS=dot(cS,vec3(0.299,0.587,0.114));
+                float lW=dot(cW,vec3(0.299,0.587,0.114));
+                float lE=dot(cE,vec3(0.299,0.587,0.114));
+                float l00=dot(c00,vec3(0.299,0.587,0.114));
+                float l11=dot(c11,vec3(0.299,0.587,0.114));
+
+                float gx=(lE-lW)*0.5;
+                float gy=(lS-lN)*0.5;
+                float edgeStrength=clamp(length(vec2(gx,gy))*4.0,0.0,1.0);
+
+                vec3 top=mix(c00,c10,f.x);
+                vec3 bot=mix(c01,c11,f.x);
+                vec3 bilinear=mix(top,bot,f.y);
+
+                vec2 fBiased=f;
+                float bias=edgeStrength*0.35;
+                fBiased.x = f.x + (f.x-0.5)*bias*sign(gx);
+                fBiased.y = f.y + (f.y-0.5)*bias*sign(gy);
+                fBiased=clamp(fBiased,0.0,1.0);
+                vec3 topB=mix(c00,c10,fBiased.x);
+                vec3 botB=mix(c01,c11,fBiased.x);
+                vec3 sharpened=mix(topB,botB,fBiased.y);
+
+                return mix(bilinear,sharpened,edgeStrength);
+            }
+
+            // ---- FSR1-style RCAS (Robust Contrast Adaptive Sharpening) ----
+            vec3 rcasSample(vec3 base){
+                vec2 texel=1.0/uSrcSize;
+                vec2 srcCoord=vUv*uSrcSize;
+                vec3 n=texture2D(uTex,(srcCoord+vec2( 0.0,-1.0))*texel).rgb;
+                vec3 s=texture2D(uTex,(srcCoord+vec2( 0.0, 1.0))*texel).rgb;
+                vec3 w=texture2D(uTex,(srcCoord+vec2(-1.0, 0.0))*texel).rgb;
+                vec3 e=texture2D(uTex,(srcCoord+vec2( 1.0, 0.0))*texel).rgb;
+                vec3 mn=min(base,min(min(n,s),min(w,e)));
+                vec3 mx=max(base,max(max(n,s),max(w,e)));
+                float mnL=min(mn.r,min(mn.g,mn.b));
+                float mxL=1.0-max(mx.r,max(mx.g,mx.b));
+                float amp=clamp(min(mnL,mxL)/max(mxL+mnL,0.0001),0.0,1.0)*0.25;
+                vec3 blur=(n+s+w+e)*0.25;
+                return base+(base-blur)*amp;
+            }
+
+            // ---- Detail Recover: structure-tensor edge-directed sharpening ----
+            // Heavier and more aggressive than EASU's simple 3x3 gradient probe.
+            // Builds the actual 2x2 structure tensor (sum of outer products of the
+            // luma gradient) over a configurable NxN window, eigen-decomposes it
+            // analytically to get the dominant edge direction + anisotropy
+            // (eigenvalue ratio), then pushes an unsharp boost that's stretched
+            // along the edge and compressed across it — recovers/invents crisp
+            // edges instead of isotropic blur-then-sharpen. Unclamped strength:
+            // pushed hard enough this will ring/crunch/artifact on purpose.
+            vec2 lumaGrad(vec2 texel,vec2 srcCoord){
+                float lE=dot(texture2D(uTex,(srcCoord+vec2(1.0,0.0))*texel).rgb,vec3(0.299,0.587,0.114));
+                float lW=dot(texture2D(uTex,(srcCoord+vec2(-1.0,0.0))*texel).rgb,vec3(0.299,0.587,0.114));
+                float lS=dot(texture2D(uTex,(srcCoord+vec2(0.0,1.0))*texel).rgb,vec3(0.299,0.587,0.114));
+                float lN=dot(texture2D(uTex,(srcCoord+vec2(0.0,-1.0))*texel).rgb,vec3(0.299,0.587,0.114));
+                return vec2((lE-lW)*0.5,(lS-lN)*0.5);
+            }
+
+            vec3 detailRecover(){
+                vec2 texel=1.0/uSrcSize;
+                vec2 srcCoord=vUv*uSrcSize;
+                vec3 base=texture2D(uTex,srcCoord*texel).rgb;
+                if(uDetail<=0.001)return base;
+
+                // structure tensor: Sxx=sum(gx*gx), Syy=sum(gy*gy), Sxy=sum(gx*gy)
+                // accumulated over a (2*win+1)^2 window of per-texel gradients.
+                // Compile-time constant loop bound (GLSL ES 1.00). Two things
+                // changed vs the naive version: (1) "break" instead of "continue"
+                // once a row/col is past uDetailWin, so cost actually scales down
+                // for small windows instead of always paying for a full 20x20
+                // sweep of branch checks; (2) a uStride so large windows sample a
+                // subsampled grid instead of every texel, keeping the per-pixel
+                // tap count roughly bounded (~<=~11x11) across the whole 1..20
+                // range -- this is what makes radius 20 (and everything below it)
+                // stay interactive instead of hanging the tab.
+                float Sxx=0.0,Syy=0.0,Sxy=0.0;
+                int stride=1+uDetailWin/10; // 1 for win<=9, 2 for win 10..19, 3 at win=20
+                for(int j=-20;j<=20;j++){
+                    if(j>uDetailWin)break;
+                    if(j<-uDetailWin)continue;
+                    if(mod(float(j),float(stride))!=0.0)continue;
+                    for(int i=-20;i<=20;i++){
+                        if(i>uDetailWin)break;
+                        if(i<-uDetailWin)continue;
+                        if(mod(float(i),float(stride))!=0.0)continue;
+                        vec2 tap=srcCoord+vec2(float(i),float(j));
+                        vec2 g=lumaGrad(texel,tap);
+                        Sxx+=g.x*g.x; Syy+=g.y*g.y; Sxy+=g.x*g.y;
+                    }
+                }
+                float winArea=float((2*(uDetailWin/stride)+1)*(2*(uDetailWin/stride)+1));
+                Sxx/=winArea; Syy/=winArea; Sxy/=winArea;
+
+                // analytic eigen-decomposition of the symmetric 2x2 [[Sxx,Sxy],[Sxy,Syy]]
+                float tr=Sxx+Syy;
+                float det=Sxx*Syy-Sxy*Sxy;
+                float disc=sqrt(max(tr*tr*0.25-det,0.0));
+                float lambda1=tr*0.5+disc; // major eigenvalue (edge-normal strength)
+                float lambda2=tr*0.5-disc; // minor eigenvalue (along-edge strength)
+
+                // dominant gradient direction (edge normal) from the eigenvector
+                vec2 edgeNormal;
+                vec2 rawNormal=vec2(Sxy,lambda1-Sxx);
+                if(abs(Sxy)>0.0001&&dot(rawNormal,rawNormal)>0.00001){
+                    edgeNormal=normalize(rawNormal);
+                } else {
+                    edgeNormal=(Sxx>=Syy)?vec2(1.0,0.0):vec2(0.0,1.0);
+                }
+                vec2 edgeTangent=vec2(-edgeNormal.y,edgeNormal.x);
+
+                // anisotropy: 0 = flat/isotropic region, ->1 = strong single-direction edge
+                float anisotropy=(lambda1+lambda2>0.0001)?(lambda1-lambda2)/(lambda1+lambda2):0.0;
+                float edgeEnergy=clamp(sqrt(lambda1)*6.0,0.0,1.0);
+
+                // directional unsharp: sample further out along the edge normal
+                // (across the edge, where the actual transition is) and less far
+                // along the tangent (along the edge, to avoid smearing it), radius
+                // driven by uDetailWin so a bigger window = a wider hallucination.
+                float reach=float(uDetailWin)*0.5+0.5;
+                vec3 plusN =texture2D(uTex,(srcCoord+edgeNormal*reach)*texel).rgb;
+                vec3 minusN=texture2D(uTex,(srcCoord-edgeNormal*reach)*texel).rgb;
+                vec3 plusT =texture2D(uTex,(srcCoord+edgeTangent*reach*0.5)*texel).rgb;
+                vec3 minusT=texture2D(uTex,(srcCoord-edgeTangent*reach*0.5)*texel).rgb;
+
+                vec3 acrossBlur=(plusN+minusN)*0.5;
+                vec3 alongBlur=(plusT+minusT)*0.5;
+                // blend the two directional blurs by anisotropy: pure edge ->
+                // mostly across-blur used as the unsharp reference (sharpens the
+                // transition hard); flat area -> mostly along-blur (isotropic,
+                // gentle, avoids inventing structure in noise/flat regions)
+                vec3 blur=mix(alongBlur,acrossBlur,anisotropy);
+
+                float amt=uDetail*edgeEnergy*(0.3+0.7*anisotropy);
+                vec3 result=base+(base-blur)*amt;
+                return result; // intentionally unclamped here; final clamp happens in main()
+            }
+
+            vec3 unsharpBoost(vec3 base){
+                if(uSharp<=0.001)return base;
+                vec2 texel=1.0/uSrcSize;
+                vec2 srcCoord=vUv*uSrcSize;
+                vec3 blur=vec3(0.0);
+                blur+=texture2D(uTex,(srcCoord+vec2(-1.0,-1.0))*texel).rgb;
+                blur+=texture2D(uTex,(srcCoord+vec2( 1.0,-1.0))*texel).rgb;
+                blur+=texture2D(uTex,(srcCoord+vec2(-1.0, 1.0))*texel).rgb;
+                blur+=texture2D(uTex,(srcCoord+vec2( 1.0, 1.0))*texel).rgb;
+                blur+=texture2D(uTex,(srcCoord+vec2( 0.0,-1.0))*texel).rgb*2.0;
+                blur+=texture2D(uTex,(srcCoord+vec2( 0.0, 1.0))*texel).rgb*2.0;
+                blur+=texture2D(uTex,(srcCoord+vec2(-1.0, 0.0))*texel).rgb*2.0;
+                blur+=texture2D(uTex,(srcCoord+vec2( 1.0, 0.0))*texel).rgb*2.0;
+                blur+=texture2D(uTex,srcCoord*texel).rgb*4.0;
+                blur/=16.0;
+                return base+(base-blur)*uSharp*2.0;
+            }
+
+            vec3 casSharpen(vec3 base){
+                if(uCas<=0.001)return base;
+                vec2 texel=1.0/uSrcSize;
+                vec2 srcCoord=vUv*uSrcSize;
+                vec3 n=texture2D(uTex,(srcCoord+vec2( 0.0,-1.0))*texel).rgb;
+                vec3 s=texture2D(uTex,(srcCoord+vec2( 0.0, 1.0))*texel).rgb;
+                vec3 w=texture2D(uTex,(srcCoord+vec2(-1.0, 0.0))*texel).rgb;
+                vec3 e=texture2D(uTex,(srcCoord+vec2( 1.0, 0.0))*texel).rgb;
+                vec3 mn=min(base,min(min(n,s),min(w,e)));
+                vec3 mx=max(base,max(max(n,s),max(w,e)));
+                vec3 range=max(mx-mn,vec3(0.0001));
+                vec3 amp=clamp((vec3(1.0)-range)*uCas*1.5,0.0,1.0);
+                vec3 blur=(n+s+w+e)*0.25;
+                return base+(base-blur)*amp;
+            }
+
+            // rotate RGB around the luma axis by uHue degrees (true hue shift,
+            // not just a warmth push) using the standard YIQ-space rotation
+            vec3 hueRotate(vec3 c,float deg){
+                if(abs(deg)<0.001)return c;
+                float rad=radians(deg);
+                float cosA=cos(rad);
+                float sinA=sin(rad);
+                mat3 m=mat3(
+                    0.299+0.701*cosA+0.168*sinA, 0.587-0.587*cosA+0.330*sinA, 0.114-0.114*cosA-0.497*sinA,
+                    0.299-0.299*cosA-0.328*sinA, 0.587+0.413*cosA+0.035*sinA, 0.114-0.114*cosA+0.292*sinA,
+                    0.299-0.300*cosA+1.250*sinA, 0.587-0.588*cosA-1.050*sinA, 0.114+0.886*cosA-0.203*sinA
+                );
+                return clamp(m*c,0.0,1.0);
+            }
+
+            vec3 applyGrade(vec3 c){
+                c*=uBright;
+                c=(c-0.5)*uContrast+0.5;
+                float luma=dot(c,vec3(0.299,0.587,0.114));
+                c=mix(vec3(luma),c,uSaturate);
+                c=pow(clamp(c,0.0,1.0),vec3(1.0/uGamma));
+                c.r+=uWarmth*0.12;
+                c.b-=uWarmth*0.12;
+                c=hueRotate(c,uHue);
+                return clamp(c,0.0,1.0);
+            }
+
+            void main(){
+                vec3 c;
+                if(uKernel==3){
+                    c=easuSample();
+                    c=rcasSample(c);
+                } else if(uKernel==4){
+                    c=detailRecover();
+                } else {
+                    c=resample();
+                }
+                c=unsharpBoost(c);
+                c=casSharpen(c);
+                c=applyGrade(c);
+
+                if(uVignette>0.001){
+                    vec2 d=vUv-0.5;
+                    float dist=length(d)*1.42;
+                    float v=smoothstep(0.4,1.1,dist)*uVignette;
+                    c*=(1.0-v);
+                }
+
+                gl_FragColor=vec4(clamp(c,0.0,1.0),1.0);
+            }
+        `;
+
+        function compile(type, src) {
+            const s = gl.createShader(type);
+            gl.shaderSource(s, src);
+            gl.compileShader(s);
+            if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+                console.error("upx shader compile error", gl.getShaderInfoLog(s));
+                return null;
+            }
+            return s;
+        }
+
+        const vs = compile(gl.VERTEX_SHADER, vsSrc);
+        const fs = compile(gl.FRAGMENT_SHADER, fsSrc);
+        if (!vs || !fs) { resEl.textContent = "shader compile failed"; return; }
+
+        program = gl.createProgram();
+        gl.attachShader(program, vs);
+        gl.attachShader(program, fs);
+        gl.linkProgram(program);
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+            console.error("upx program link error", gl.getProgramInfoLog(program));
+            resEl.textContent = "program link failed";
+            return;
+        }
+        gl.useProgram(program);
+
+        const vbo = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+        const aPos = gl.getAttribLocation(program, "aPos");
+        gl.enableVertexAttribArray(aPos);
+        gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+        texture = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+        uLoc = {
+            uTex: gl.getUniformLocation(program, "uTex"),
+            uSrcSize: gl.getUniformLocation(program, "uSrcSize"),
+            uKernel: gl.getUniformLocation(program, "uKernel"),
+            uTapRadius: gl.getUniformLocation(program, "uTapRadius"),
+            uDetailWin: gl.getUniformLocation(program, "uDetailWin"),
+            uDetail: gl.getUniformLocation(program, "uDetail"),
+            uSharp: gl.getUniformLocation(program, "uSharp"),
+            uCas: gl.getUniformLocation(program, "uCas"),
+            uAntiRing: gl.getUniformLocation(program, "uAntiRing"),
+            uContrast: gl.getUniformLocation(program, "uContrast"),
+            uSaturate: gl.getUniformLocation(program, "uSaturate"),
+            uBright: gl.getUniformLocation(program, "uBright"),
+            uGamma: gl.getUniformLocation(program, "uGamma"),
+            uWarmth: gl.getUniformLocation(program, "uWarmth"),
+            uHue: gl.getUniformLocation(program, "uHue"),
+            uVignette: gl.getUniformLocation(program, "uVignette")
+        };
+
+        glReady = true;
+    } catch (e) {
+        console.error("upscaler initGL failed", e);
+        resEl.textContent = "WebGL init failed";
+    }
+}
+
+const kernelIdx = { catmullrom: 0, lanczos2: 1, lanczos3: 2, fsr: 3, detailrecover: 4 };
+
+// ---- zoom: hardcoded canvas size, direct px, no CSS transform ----
+// Source is #canvas -- the same element the main paint loop already draws
+// decoded VideoFrames into. Read fresh every call (it's a fixed element
+// here, unlike the reference's swappable video pair, but kept as a
+// function for parity/clarity).
+function currentSourceEl() {
+    return document.getElementById("v");
+}
+
+function applyCanvasSize() {
+    const src = currentSourceEl();
+    if (!src || !src.width || !src.height) return;
+    const w = Math.round(src.width * scaleMult * userZoom);
+    const h = Math.round(src.height * scaleMult * userZoom);
+    glCanvas.width = w;
+    glCanvas.height = h;
+    glCanvas.style.width = w + "px";
+    glCanvas.style.height = h + "px";
+    if (gl) gl.viewport(0, 0, w, h);
+}
+
+document.getElementById("upx-zplus").addEventListener("click", () => {
+    userZoom = Math.min(4, +(userZoom + 0.25).toFixed(2));
+    applyCanvasSize();
+});
+document.getElementById("upx-zminus").addEventListener("click", () => {
+    userZoom = Math.max(1, +(userZoom - 0.25).toFixed(2));
+    applyCanvasSize();
+});
+
+// Fullscreen for the upscale viewport only.
+function upxToggleFullscreen() {
+    if (document.fullscreenElement === viewport) {
+        document.exitFullscreen();
+    } else {
+        viewport.requestFullscreen().catch((e) => console.warn("upscale fullscreen failed:", e.message));
+    }
+}
+document.getElementById("upx-fullscreen").addEventListener("click", upxToggleFullscreen);
+document.getElementById("upx-fullscreen-bottom").addEventListener("click", upxToggleFullscreen);
+
+// ---- pinch-to-zoom on the viewport, reuses userZoom/applyCanvasSize ----
+(function() {
+    let pinchStartDist = null;
+    let pinchStartZoom = 1;
+    function dist(t0, t1) {
+        const dx = t0.clientX - t1.clientX, dy = t0.clientY - t1.clientY;
+        return Math.hypot(dx, dy);
+    }
+    viewport.addEventListener("touchstart", (e) => {
+        if (e.touches.length === 2) {
+            pinchStartDist = dist(e.touches[0], e.touches[1]);
+            pinchStartZoom = userZoom;
+        }
+    }, { passive: true });
+    viewport.addEventListener("touchmove", (e) => {
+        if (e.touches.length === 2 && pinchStartDist) {
+            e.preventDefault();
+            const d = dist(e.touches[0], e.touches[1]);
+            userZoom = Math.max(1, Math.min(4, +(pinchStartZoom * (d / pinchStartDist)).toFixed(2)));
+            applyCanvasSize();
+        }
+    }, { passive: false });
+    viewport.addEventListener("touchend", (e) => {
+        if (e.touches.length < 2) pinchStartDist = null;
+    }, { passive: true });
+})();
+
+let lastSrcW = 0, lastSrcH = 0;
+let frameCount = 0, lastFpsTime = performance.now();
+
+// #canvas's dimensions are locked once on first frame by the main pipeline
+// (see the "locked canvas dimensions on first frame" behavior above) and
+// never change after that, and drawImage() writes happen synchronously in
+// paintLoop() -- there's no swap/settle race like the reference's dual
+// <video> elements had, so this loop simply reads #canvas directly every
+// tick with no settle-wait logic needed.
+function renderLoop() {
+    requestAnimationFrame(renderLoop);
+    if (!active || !glReady) {
+        if (active && !glReady) resEl.textContent = "waiting: gl not ready";
+        return;
+    }
+
+    const src = currentSourceEl();
+    if (!src) { resEl.textContent = "waiting: no source element"; return; }
+
+    const sw = src.width, sh = src.height;
+    if (!sw || !sh) { resEl.textContent = `waiting: canvas has 0 dimensions`; return; }
+
+    if (sw !== lastSrcW || sh !== lastSrcH) {
+        lastSrcW = sw; lastSrcH = sh;
+        applyCanvasSize();
+    }
+
+    try {
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, src);
+    } catch (e) {
+        if (e.name === "SecurityError" || /tainted|cross-origin|insecure/i.test(e.message)) {
+            resEl.textContent = "CORS blocked: segment source needs Access-Control-Allow-Origin for this page's origin";
+        } else {
+            resEl.textContent = "texImage2D error: " + e.message;
+        }
+        return; // e.g. canvas not painted yet this frame -- skip, try again next tick
+    }
+
+    gl.useProgram(program);
+    gl.uniform1i(uLoc.uTex, 0);
+    gl.uniform2f(uLoc.uSrcSize, sw, sh);
+    gl.uniform1i(uLoc.uKernel, kernelIdx[kernel]);
+    gl.uniform1f(uLoc.uTapRadius, tapRadius);
+    gl.uniform1i(uLoc.uDetailWin, Math.round(detailWin));
+    gl.uniform1f(uLoc.uDetail, detailAmt);
+    gl.uniform1f(uLoc.uSharp, sharpAmt);
+    gl.uniform1f(uLoc.uCas, casAmt);
+    gl.uniform1f(uLoc.uAntiRing, antiRingAmt);
+    gl.uniform1f(uLoc.uContrast, contrastAmt);
+    gl.uniform1f(uLoc.uSaturate, saturateAmt);
+    gl.uniform1f(uLoc.uBright, brightAmt);
+    gl.uniform1f(uLoc.uGamma, gammaAmt);
+    gl.uniform1f(uLoc.uWarmth, warmthAmt);
+    gl.uniform1f(uLoc.uHue, hueAmt);
+    gl.uniform1f(uLoc.uVignette, vignetteAmt);
+
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    frameCount++;
+    const now = performance.now();
+    if (now - lastFpsTime >= 500) {
+        const fps = (frameCount / ((now - lastFpsTime) / 1000)).toFixed(0);
+        resEl.textContent = `${fps} fps | ${sw}x${sh} src -> ${glCanvas.width}x${glCanvas.height}`;
+        frameCount = 0; lastFpsTime = now;
+    }
+}
+requestAnimationFrame(renderLoop);
+
+function setActive(v) {
+    active = v;
+    const orig = document.getElementById("v");
+    if (orig) orig.style.display = v ? "none" : "";
+    if (v && !glReady) initGL();
+    if (v) applyCanvasSize();
+}
+
+// ---- optional localStorage backing for the "Upscale enabled" checkbox ----
+// Off by default (nothing persisted, nothing read) unless the persist
+// checkbox itself is checked. When persist is on, every change to either
+// checkbox writes both the enabled flag and the persist flag; on load, if
+// persist was previously on, the saved enabled value is restored and
+// applied via setActive/toggleCb -- otherwise the checkbox's plain HTML
+// default (unchecked) is left alone.
+const UPX_TOGGLE_PERSIST_KEY = "upx-toggle-persist-ffclientu";
+const UPX_ENABLED_KEY = "upx-enabled-ffclientu";
+
+function upxSaveToggleState() {
+    localStorage.setItem(UPX_TOGGLE_PERSIST_KEY, togglePersistCb.checked ? "1" : "0");
+    if (togglePersistCb.checked) {
+        localStorage.setItem(UPX_ENABLED_KEY, toggleCb.checked ? "1" : "0");
+    } else {
+        localStorage.removeItem(UPX_ENABLED_KEY);
+    }
+}
+
+(function initToggleState() {
+    const persistSaved = localStorage.getItem(UPX_TOGGLE_PERSIST_KEY) === "1";
+    togglePersistCb.checked = persistSaved;
+    if (persistSaved) {
+        const enabledSaved = localStorage.getItem(UPX_ENABLED_KEY) === "1";
+        toggleCb.checked = enabledSaved;
+        setActive(enabledSaved);
+    }
+})();
+
+toggleCb.addEventListener("change", () => {
+    setActive(toggleCb.checked);
+    upxSaveToggleState();
+});
+togglePersistCb.addEventListener("change", upxSaveToggleState);
+
+kernelSel.addEventListener("change", () => { kernel = kernelSel.value; });
+
+scaleInput.addEventListener("change", () => {
+    const v = parseFloat(scaleInput.value);
+    if (Number.isFinite(v) && v >= 1 && v <= 6) {
+        scaleMult = v;
+        applyCanvasSize();
+    } else {
+        scaleInput.value = scaleMult;
+    }
+});
+
+document.querySelector(".upx-scale-step-minus").addEventListener("click", () => {
+    const v = Math.max(1, Math.min(6, parseFloat(scaleInput.value) - 0.5));
+    scaleInput.value = v;
+    scaleInput.dispatchEvent(new Event("change"));
+});
+document.querySelector(".upx-scale-step-plus").addEventListener("click", () => {
+    const v = Math.max(1, Math.min(6, parseFloat(scaleInput.value) + 0.5));
+    scaleInput.value = v;
+    scaleInput.dispatchEvent(new Event("change"));
+});
+
+// ---- generic slider wiring: range input + number readout + -/+ steppers,
+// all three kept in sync, live-updating the underlying *Amt var on "input"
+// (not "change") so dragging the slider updates the shader immediately.
+function wireSlider(id, setter, getter, scale, step) {
+    const range = document.getElementById(id);
+    const num = document.getElementById(id + "-num");
+    const min = parseFloat(range.min);
+    const max = parseFloat(range.max);
+    step = step || 1;
+
+    // decimals to round to, derived from step (e.g. step=0.1 -> 1 decimal),
+    // so repeated +/- clicks on a fractional-step slider don't accumulate
+    // float noise like 1.9999999999999998.
+    const stepDecimals = (String(step).split(".")[1] || "").length;
+
+    function apply(raw) {
+        let v = parseFloat(raw);
+        if (!Number.isFinite(v)) v = getter() * scale;
+        v = Math.min(max, Math.max(min, v));
+        if (stepDecimals > 0) v = parseFloat(v.toFixed(stepDecimals));
+        range.value = v;
+        num.value = v;
+        setter(v / scale);
+    }
+
+    range.addEventListener("input", () => apply(range.value));
+    num.addEventListener("change", () => apply(num.value));
+    document.querySelectorAll(`.upx-step-minus[data-target="${id}"]`).forEach(btn =>
+        btn.addEventListener("click", () => apply(parseFloat(range.value) - step))
+    );
+    document.querySelectorAll(`.upx-step-plus[data-target="${id}"]`).forEach(btn =>
+        btn.addEventListener("click", () => apply(parseFloat(range.value) + step))
+    );
+}
+
+wireSlider("upx-sharp",     v => sharpAmt = v,     () => sharpAmt,     100);
+wireSlider("upx-tapradius", v => tapRadius = v,    () => tapRadius,    1, 0.1);
+wireSlider("upx-detailwin", v => detailWin = v,    () => detailWin,    1, 0.1);
+wireSlider("upx-detail",    v => detailAmt = v,    () => detailAmt,    100, 10);
+wireSlider("upx-cas",       v => casAmt = v,       () => casAmt,       100);
+wireSlider("upx-antiring",  v => antiRingAmt = v,  () => antiRingAmt,  100);
+wireSlider("upx-bright",    v => brightAmt = v,    () => brightAmt,    100);
+wireSlider("upx-contrast",  v => contrastAmt = v,  () => contrastAmt,  100);
+wireSlider("upx-saturate",  v => saturateAmt = v,  () => saturateAmt,  100);
+wireSlider("upx-hue",       v => hueAmt = v,       () => hueAmt,       1);
+wireSlider("upx-gamma",     v => gammaAmt = v,     () => gammaAmt,     100);
+wireSlider("upx-warmth",    v => warmthAmt = v,    () => warmthAmt,    100);
+wireSlider("upx-vignette",  v => vignetteAmt = v,  () => vignetteAmt,  100);
+
+// ---- settings panel left offset (px), persisted in localStorage ----
+const panelOffsetEl = document.getElementById("upx-panel-offset");
+const panelOffsetInput = document.getElementById("upx-panel-offset-input");
+const PANEL_OFFSET_KEY = "upx-panel-offset-px-ffclientu";
+
+function applyPanelOffset(px) {
+    panelOffsetEl.style.marginLeft = px + "px";
+    panelOffsetInput.value = px;
+}
+
+(function initPanelOffset() {
+    const saved = parseInt(localStorage.getItem(PANEL_OFFSET_KEY), 10);
+    applyPanelOffset(Number.isFinite(saved) ? saved : 0);
+})();
+
+panelOffsetInput.addEventListener("change", () => {
+    let v = parseInt(panelOffsetInput.value, 10);
+    if (!Number.isFinite(v)) v = 0;
+    applyPanelOffset(v);
+    localStorage.setItem(PANEL_OFFSET_KEY, v);
+});
+
+// ---- page font size (+/-), global (not per-profile), persisted in
+// localStorage. Scales the whole page via a % on <html> font-size, since
+// everything else in this file is written in relative/em-ish spacing off
+// the body's monospace font. ----
+const PAGE_FONT_KEY = "ffstream-page-font-pct";
+const pageFontPctEl = document.getElementById("pageFontPct");
+const PAGE_FONT_MIN = 60, PAGE_FONT_MAX = 200, PAGE_FONT_STEP = 10;
+
+function applyPageFontPct(pct) {
+    pct = Math.max(PAGE_FONT_MIN, Math.min(PAGE_FONT_MAX, pct));
+    document.documentElement.style.fontSize = pct + "%";
+    pageFontPctEl.textContent = pct + "%";
+    return pct;
+}
+
+let pageFontPct = parseInt(localStorage.getItem(PAGE_FONT_KEY), 10);
+if (!Number.isFinite(pageFontPct)) pageFontPct = 100;
+pageFontPct = applyPageFontPct(pageFontPct);
+
+document.getElementById("pageFontMinus").addEventListener("click", () => {
+    pageFontPct = applyPageFontPct(pageFontPct - PAGE_FONT_STEP);
+    localStorage.setItem(PAGE_FONT_KEY, pageFontPct);
+});
+document.getElementById("pageFontPlus").addEventListener("click", () => {
+    pageFontPct = applyPageFontPct(pageFontPct + PAGE_FONT_STEP);
+    localStorage.setItem(PAGE_FONT_KEY, pageFontPct);
+});
+
+// ---- collapsible settings sections: open/closed state persisted in
+// localStorage per section, so it's remembered across reloads. ----
+const SECTION_STATE_KEY = "ffstream-section-open-state";
+function loadSectionState() {
+    try {
+        const raw = localStorage.getItem(SECTION_STATE_KEY);
+        return raw ? JSON.parse(raw) : {};
+    } catch (_) { return {}; }
+}
+function saveSectionState(state) {
+    try { localStorage.setItem(SECTION_STATE_KEY, JSON.stringify(state)); } catch (_) {}
+}
+(function initSections() {
+    const state = loadSectionState();
+    document.querySelectorAll("details.upx-section").forEach((det) => {
+        if (Object.prototype.hasOwnProperty.call(state, det.id)) {
+            det.open = !!state[det.id];
+        }
+        det.addEventListener("toggle", () => {
+            const s = loadSectionState();
+            s[det.id] = det.open;
+            saveSectionState(s);
+        });
+    });
+})();
+
+document.getElementById("btnCollapseAll").addEventListener("click", () => {
+    const s = loadSectionState();
+    document.querySelectorAll("details.upx-section").forEach((det) => {
+        det.open = false;
+        s[det.id] = false;
+    });
+    saveSectionState(s);
+});
+document.getElementById("btnExpandAll").addEventListener("click", () => {
+    const s = loadSectionState();
+    document.querySelectorAll("details.upx-section").forEach((det) => {
+        det.open = true;
+        s[det.id] = true;
+    });
+    saveSectionState(s);
+});
+
+// ---- floating draggable clock ----
+// Time-only (HH:MM:SS, same format as the Android screenshot bar it's
+// echoing), fixed-position so it floats over both the normal and upscaled
+// canvases. Visibility and position are persisted to localStorage.
+// Draggable via mouse/touch; also focusable + arrow-key nudgeable as a
+// fallback for when drag is fiddly on a touchscreen.
+(function () {
+    const CLOCK_VISIBLE_KEY = "ffstream-clock-visible";
+    const CLOCK_POS_KEY = "ffstream-clock-pos";
+    const CLOCK_FONT_KEY = "ffstream-clock-font-px";
+    const CLOCK_FONT_MIN = 10, CLOCK_FONT_MAX = 96, CLOCK_FONT_STEP = 2;
+    const clockEl = document.getElementById("floatingClock");
+    const clockToggle = document.getElementById("clockToggle");
+    const clockFontMinus = document.getElementById("clockFontMinus");
+    const clockFontPlus = document.getElementById("clockFontPlus");
+    const homeParent = clockEl.parentNode;
+
+    clockEl.tabIndex = 0; // focusable, so arrow keys can target it
+
+    function applyClockFontPx(px) {
+        px = Math.max(CLOCK_FONT_MIN, Math.min(CLOCK_FONT_MAX, px));
+        clockEl.style.fontSize = px + "px";
+        return px;
+    }
+    let clockFontPx = parseInt(localStorage.getItem(CLOCK_FONT_KEY), 10);
+    if (!Number.isFinite(clockFontPx)) clockFontPx = 14;
+    clockFontPx = applyClockFontPx(clockFontPx);
+    clockFontMinus.addEventListener("click", () => {
+        clockFontPx = applyClockFontPx(clockFontPx - CLOCK_FONT_STEP);
+        try { localStorage.setItem(CLOCK_FONT_KEY, clockFontPx); } catch (_) {}
+    });
+    clockFontPlus.addEventListener("click", () => {
+        clockFontPx = applyClockFontPx(clockFontPx + CLOCK_FONT_STEP);
+        try { localStorage.setItem(CLOCK_FONT_KEY, clockFontPx); } catch (_) {}
+    });
+
+    function tick() {
+        const d = new Date();
+        const hh = String(d.getHours()).padStart(2, "0");
+        const mm = String(d.getMinutes()).padStart(2, "0");
+        const ss = String(d.getSeconds()).padStart(2, "0");
+        clockEl.textContent = hh + ":" + mm + ":" + ss;
+    }
+    tick();
+    setInterval(tick, 1000);
+
+    function loadPos() {
+        try {
+            const raw = localStorage.getItem(CLOCK_POS_KEY);
+            const p = raw ? JSON.parse(raw) : null;
+            if (p && Number.isFinite(p.top) && Number.isFinite(p.left)) return p;
+        } catch (_) {}
+        return { top: 8, left: 8 };
+    }
+    function savePos(top, left) {
+        try { localStorage.setItem(CLOCK_POS_KEY, JSON.stringify({ top, left })); } catch (_) {}
+    }
+    function applyPos(top, left) {
+        // clamp against the *visual* viewport (what's actually on-screen),
+        // not just window.innerWidth/Height -- on a page wider than the
+        // device (this page has a fixed 1280px canvas with no body
+        // max-width), mobile browsers render zoomed-out, and innerWidth/
+        // Height report the full zoomed-out layout size, not the visible
+        // slice. That let a "left:8" default land near the right/bottom
+        // edge of what's actually visible on screen. visualViewport gives
+        // the real on-screen bounds when available.
+        const vv = window.visualViewport;
+        const viewW = vv ? vv.width : window.innerWidth;
+        const viewH = vv ? vv.height : window.innerHeight;
+        const maxTop = Math.max(0, viewH - clockEl.offsetHeight);
+        const maxLeft = Math.max(0, viewW - clockEl.offsetWidth);
+        top = Math.min(Math.max(0, top), maxTop);
+        left = Math.min(Math.max(0, left), maxLeft);
+        clockEl.style.top = top + "px";
+        clockEl.style.left = left + "px";
+        return { top, left };
+    }
+    let pos = loadPos();
+    applyPos(pos.top, pos.left);
+    (window.visualViewport || window).addEventListener("resize", () => {
+        pos = applyPos(pos.top, pos.left);
+    });
+
+    function setVisible(v) {
+        clockEl.style.display = v ? "" : "none";
+        clockToggle.checked = v;
+        try { localStorage.setItem(CLOCK_VISIBLE_KEY, v ? "1" : "0"); } catch (_) {}
+    }
+    setVisible(localStorage.getItem(CLOCK_VISIBLE_KEY) === "1");
+    clockToggle.addEventListener("change", () => setVisible(clockToggle.checked));
+
+    // ---- drag (mouse + touch) ----
+    let dragging = false, dragOffX = 0, dragOffY = 0;
+    function dragStart(clientX, clientY) {
+        dragging = true;
+        const rect = clockEl.getBoundingClientRect();
+        dragOffX = clientX - rect.left;
+        dragOffY = clientY - rect.top;
+        clockEl.focus();
+    }
+    function dragMove(clientX, clientY) {
+        if (!dragging) return;
+        const p = applyPos(clientY - dragOffY, clientX - dragOffX);
+        pos = p;
+    }
+    function dragEnd() {
+        if (!dragging) return;
+        dragging = false;
+        savePos(pos.top, pos.left);
+    }
+    clockEl.addEventListener("mousedown", (e) => { dragStart(e.clientX, e.clientY); e.preventDefault(); });
+    window.addEventListener("mousemove", (e) => dragMove(e.clientX, e.clientY));
+    window.addEventListener("mouseup", dragEnd);
+    clockEl.addEventListener("touchstart", (e) => {
+        const t = e.touches[0];
+        dragStart(t.clientX, t.clientY);
+    }, { passive: true });
+    window.addEventListener("touchmove", (e) => {
+        if (!dragging) return;
+        const t = e.touches[0];
+        dragMove(t.clientX, t.clientY);
+        e.preventDefault();
+    }, { passive: false });
+    window.addEventListener("touchend", dragEnd);
+
+    // ---- arrow-key nudge fallback ----
+    clockEl.addEventListener("keydown", (e) => {
+        const step = e.shiftKey ? 20 : 4;
+        let handled = true;
+        const rect = clockEl.getBoundingClientRect();
+        let top = rect.top, left = rect.left;
+        if (e.key === "ArrowUp") top -= step;
+        else if (e.key === "ArrowDown") top += step;
+        else if (e.key === "ArrowLeft") left -= step;
+        else if (e.key === "ArrowRight") left += step;
+        else handled = false;
+        if (handled) {
+            e.preventDefault();
+            pos = applyPos(top, left);
+            savePos(pos.top, pos.left);
+        }
+    });
+
+    // ---- keep the clock visible during fullscreen by re-parenting it
+    // into whichever element is currently fullscreen (the top layer only
+    // renders the fullscreen element's own subtree), then back to body
+    // when fullscreen exits. ----
+    document.addEventListener("fullscreenchange", () => {
+        const fsEl = document.fullscreenElement;
+        const target = fsEl || homeParent;
+        if (clockEl.parentNode !== target) target.appendChild(clockEl);
+        applyPos(pos.top, pos.left);
+    });
+})();
+
+// ---- on-screen keys overlay ----
+// Sits directly on top of the black upscaled-output canvas (#upx-viewport,
+// which is already position:relative) as an absolutely-positioned layer
+// matching that box's size. Circular tap buttons that fire a down URL on
+// press and an up URL on release. Each key: {id,label,x,y,size,opacity,
+// color,base,down,up,enabled}. x/y are pixel offsets from the viewport
+// box's own top-left corner (clamped into the box on render/drag, so
+// stray/out-of-range imported coordinates land inside the box instead of
+// off in the page somewhere -- drag them into place once clamped). base is
+// prepended to both down/up (which may be full URLs already, in which
+// case base is ignored for that key -- see keysResolveUrl). Broken/
+// placeholder URLs in imported data are left as-is by design; this is
+// just plumbing.
+(function () {
+    const KEYS_STORE_KEY = "ffstream-keys-data";       // current live keyset
+    const KEYS_ENABLE_KEY = "ffstream-keys-enabled";
+    const KEYS_PROFILES_KEY = "ffstream-keys-profiles"; // named keyset profiles
+    // default color is a light translucent white so keys read clearly
+    // against the black video underneath, instead of black-on-black
+    const DEFAULT_SIZE = 90, DEFAULT_OPACITY = 0.35, DEFAULT_COLOR = "#ffffff";
+
+    const layer = document.getElementById("keysLayer");
+    const viewportEl = document.getElementById("upx-viewport");
+    const enableCb = document.getElementById("keys-enable-cb");
+    const unlockCb = document.getElementById("keys-unlock-cb");
+    const searchInput = document.getElementById("keys-search");
+    const listEl = document.getElementById("keys-list");
+    const countEl = document.getElementById("keys-count");
+
+    let keys = [];       // in-memory array of key objects
+    let nextId = 1;
+
+    function genId() { return "k" + (nextId++) + "_" + Date.now().toString(36); }
+
+    function loadKeys() {
+        try {
+            const raw = localStorage.getItem(KEYS_STORE_KEY);
+            const arr = raw ? JSON.parse(raw) : [];
+            if (Array.isArray(arr)) return arr;
+        } catch (_) {}
+        return [];
+    }
+    function saveKeys() {
+        try { localStorage.setItem(KEYS_STORE_KEY, JSON.stringify(keys)); } catch (_) {}
+    }
+
+    // ---- parse/serialize the 5-line paste format: blank-line-separated
+    // blocks of "x y" / "label opacity size color" / downURL / upURL ----
+    function parseKeysBlock(text) {
+        const lines = text.replace(/\r\n/g, "\n").split("\n");
+        const blocks = [];
+        let cur = [];
+        for (const rawLine of lines) {
+            const line = rawLine.trim();
+            if (line === "") {
+                if (cur.length) blocks.push(cur);
+                cur = [];
+            } else {
+                cur.push(line);
+            }
+        }
+        if (cur.length) blocks.push(cur);
+
+        const parsed = [];
+        blocks.forEach(block => {
+            if (block.length < 4) return; // malformed block, skip
+            const [xStr, yStr] = block[0].split(/\s+/);
+            const metaParts = block[1].split(/\s+/);
+            const color = metaParts.length ? metaParts[metaParts.length - 1] : DEFAULT_COLOR;
+            const size = metaParts.length >= 2 ? parseFloat(metaParts[metaParts.length - 2]) : DEFAULT_SIZE;
+            const opacity = metaParts.length >= 3 ? parseFloat(metaParts[metaParts.length - 3]) : DEFAULT_OPACITY;
+            const label = metaParts.slice(0, Math.max(1, metaParts.length - 3)).join(" ") || "?";
+            const down = block[2] || "";
+            const up = block[3] || "";
+            parsed.push({
+                id: genId(),
+                label,
+                x: parseFloat(xStr) || 0,
+                y: parseFloat(yStr) || 0,
+                size: Number.isFinite(size) ? size : DEFAULT_SIZE,
+                opacity: Number.isFinite(opacity) ? opacity : DEFAULT_OPACITY,
+                color: color || DEFAULT_COLOR,
+                base: "",
+                down, up,
+                enabled: true
+            });
+        });
+        return parsed;
+    }
+
+    function serializeKeysBlock(arr) {
+        return arr.map(k =>
+            `${k.x} ${k.y}\n${k.label} ${k.opacity} ${k.size} ${k.color}\n${keysResolveUrl(k, "down")}\n${keysResolveUrl(k, "up")}`
+        ).join("\n\n");
+    }
+
+    // converts a key's stored hex/named color + opacity into an rgba()
+    // background, so opacity only affects the circle fill -- not the label
+    // text drawn on top of it (previously the whole element's CSS opacity
+    // was used, which faded the text into unreadability too).
+    function colorWithAlpha(color, opacity) {
+        const a = Number.isFinite(opacity) ? Math.max(0, Math.min(1, opacity)) : DEFAULT_OPACITY;
+        const hexMatch = /^#([0-9a-f]{6}|[0-9a-f]{8})$/i.exec((color || "").trim());
+        if (hexMatch) {
+            const hex = hexMatch[1];
+            const r = parseInt(hex.slice(0, 2), 16);
+            const g = parseInt(hex.slice(2, 4), 16);
+            const b = parseInt(hex.slice(4, 6), 16);
+            return `rgba(${r},${g},${b},${a})`;
+        }
+        return color || `rgba(255,255,255,${a})`; // fallback: trust it as-is (named colors etc.)
+    }
+
+    // clamps a key's stored x/y (pixel offset from the viewport box's own
+    // top-left) so it always renders inside that box, regardless of what
+    // coordinates it was imported/pasted with.
+    function clampToViewport(k) {
+        const w = viewportEl.clientWidth || 1, h = viewportEl.clientHeight || 1;
+        const maxX = Math.max(0, w - k.size), maxY = Math.max(0, h - k.size);
+        return {
+            x: Math.min(Math.max(0, k.x), maxX),
+            y: Math.min(Math.max(0, k.y), maxY)
+        };
+    }
+
+    // base is only applied when the per-key URL doesn't already look like
+    // a full URL (starts with a scheme) -- lets imported absolute URLs
+    // (including the intentionally-broken sample ones) pass through
+    // untouched, while new keys can rely on the base-route prefill.
+    function keysResolveUrl(k, which) {
+        const raw = (which === "down" ? k.down : k.up) || "";
+        if (/^https?:\/\//i.test(raw) || !k.base) return raw;
+        return k.base.replace(/\/+$/, "") + (raw.startsWith("/") ? raw : "/" + raw);
+    }
+
+    // ---- rendering ----
+    function render() {
+        const filter = (searchInput.value || "").trim().toLowerCase();
+        layer.innerHTML = "";
+        keys.forEach(k => {
+            if (!k.enabled) return;
+            if (filter && !k.label.toLowerCase().includes(filter)) return;
+            const pos = clampToViewport(k);
+            const btn = document.createElement("div");
+            btn.textContent = k.label;
+            btn.dataset.keyId = k.id;
+            btn.style.cssText = `position:absolute;top:${pos.y}px;left:${pos.x}px;width:${k.size}px;height:${k.size}px;
+                border-radius:50%;display:flex;align-items:center;justify-content:center;
+                background:${colorWithAlpha(k.color, k.opacity)};color:#fff;font-family:monospace;
+                text-shadow:0 0 3px #000,0 0 3px #000;
+                font-size:${Math.max(10, k.size * 0.16)}px;user-select:none;text-align:center;
+                touch-action:none;pointer-events:auto;box-sizing:border-box;`;
+            layer.appendChild(btn);
+        });
+        countEl.textContent = String(keys.length);
+        renderList();
+    }
+
+    function renderList() {
+        const filter = (searchInput.value || "").trim().toLowerCase();
+        listEl.innerHTML = "";
+        keys.filter(k => !filter || k.label.toLowerCase().includes(filter)).forEach(k => {
+            const row = document.createElement("div");
+            row.style.cssText = "display:flex;align-items:center;gap:6px;font-size:11px;padding:2px 0;border-bottom:1px solid #eee;";
+            const cb = document.createElement("input");
+            cb.type = "checkbox";
+            cb.checked = k.enabled;
+            cb.addEventListener("change", () => { k.enabled = cb.checked; saveKeys(); render(); });
+            const lbl = document.createElement("span");
+            lbl.textContent = k.label;
+            lbl.style.cssText = "flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+            const delBtn = document.createElement("button");
+            delBtn.textContent = "x";
+            delBtn.style.cssText = "background:#fde0d8;border:1px solid #c96;color:#132;font-family:monospace;padding:2px 8px;border-radius:3px;cursor:pointer;";
+            delBtn.addEventListener("click", () => {
+                keys = keys.filter(kk => kk.id !== k.id);
+                saveKeys(); render();
+            });
+            row.appendChild(cb); row.appendChild(lbl); row.appendChild(delBtn);
+            listEl.appendChild(row);
+        });
+    }
+
+    searchInput.addEventListener("input", render);
+
+    document.getElementById("keys-enable-all-btn").addEventListener("click", () => {
+        keys.forEach(k => { k.enabled = true; });
+        saveKeys(); render();
+    });
+    document.getElementById("keys-disable-all-btn").addEventListener("click", () => {
+        keys.forEach(k => { k.enabled = false; });
+        saveKeys(); render();
+    });
+
+    // ---- overlay enable/disable ----
+    function setLayerVisible(v) {
+        layer.style.display = v ? "" : "none";
+        enableCb.checked = v;
+        try { localStorage.setItem(KEYS_ENABLE_KEY, v ? "1" : "0"); } catch (_) {}
+    }
+    enableCb.addEventListener("change", () => setLayerVisible(enableCb.checked));
+
+    // ---- unlock/drag mode ----
+    let unlocked = false;
+    unlockCb.addEventListener("change", () => {
+        unlocked = unlockCb.checked;
+        layer.style.pointerEvents = "none"; // children set their own pointer-events
+        render();
+    });
+
+    let dragKeyId = null, dragOffX = 0, dragOffY = 0;
+    layer.addEventListener("pointerdown", (e) => {
+        const el = e.target.closest("[data-key-id]");
+        if (!el) return;
+        const k = keys.find(kk => kk.id === el.dataset.keyId);
+        if (!k) return;
+        if (unlocked) {
+            dragKeyId = k.id;
+            const rect = el.getBoundingClientRect();
+            dragOffX = e.clientX - rect.left;
+            dragOffY = e.clientY - rect.top;
+            e.preventDefault();
+        } else {
+            // press feedback: brighten the translucent fill and boost its
+            // alpha, rather than touching element opacity (that would also
+            // fade the label text, which we keep fully readable now)
+            el.style.background = colorWithAlpha(k.color, Math.min(1, (k.opacity || DEFAULT_OPACITY) + 0.4));
+            el.style.filter = "brightness(1.6)";
+            fetch(keysResolveUrl(k, "down")).catch(() => {}); // silent by design -- broken URLs are expected/allowed
+            el.setPointerCapture && el.setPointerCapture(e.pointerId);
+        }
+    });
+    layer.addEventListener("pointermove", (e) => {
+        if (!dragKeyId) return;
+        const k = keys.find(kk => kk.id === dragKeyId);
+        if (!k) return;
+        const vpRect = viewportEl.getBoundingClientRect();
+        k.x = Math.round(e.clientX - vpRect.left - dragOffX);
+        k.y = Math.round(e.clientY - vpRect.top - dragOffY);
+        const pos = clampToViewport(k);
+        k.x = pos.x; k.y = pos.y;
+        const el = layer.querySelector(`[data-key-id="${dragKeyId}"]`);
+        if (el) { el.style.left = k.x + "px"; el.style.top = k.y + "px"; }
+    });
+    function endDrag() {
+        if (!dragKeyId) return;
+        dragKeyId = null;
+        saveKeys();
+    }
+    layer.addEventListener("pointerup", (e) => {
+        if (dragKeyId) { endDrag(); return; }
+        const el = e.target.closest("[data-key-id]");
+        if (!el || unlocked) return;
+        const k = keys.find(kk => kk.id === el.dataset.keyId);
+        if (!k) return;
+        el.style.filter = "";
+        el.style.background = colorWithAlpha(k.color, k.opacity);
+        fetch(keysResolveUrl(k, "up")).catch(() => {});
+    });
+    layer.addEventListener("pointercancel", (e) => {
+        if (dragKeyId) { endDrag(); return; }
+        const el = e.target.closest("[data-key-id]");
+        if (!el) return;
+        const k = keys.find(kk => kk.id === el.dataset.keyId);
+        el.style.filter = "";
+        if (k) el.style.background = colorWithAlpha(k.color, k.opacity);
+    });
+
+    // ---- add-key form ----
+    document.getElementById("keys-add-btn").addEventListener("click", () => {
+        const label = document.getElementById("keys-add-label").value.trim() || "?";
+        const x = parseFloat(document.getElementById("keys-add-x").value) || 0;
+        const y = parseFloat(document.getElementById("keys-add-y").value) || 0;
+        const size = parseFloat(document.getElementById("keys-add-size").value) || DEFAULT_SIZE;
+        const opacity = parseFloat(document.getElementById("keys-add-opacity").value);
+        const color = document.getElementById("keys-add-color").value.trim() || DEFAULT_COLOR;
+        const base = document.getElementById("keys-add-base").value.trim();
+        const down = document.getElementById("keys-add-down").value.trim();
+        const up = document.getElementById("keys-add-up").value.trim();
+        keys.push({
+            id: genId(), label, x, y, size,
+            opacity: Number.isFinite(opacity) ? opacity : DEFAULT_OPACITY,
+            color, base, down, up, enabled: true
+        });
+        saveKeys(); render();
+    });
+
+    // ---- import (paste block format) ----
+    document.getElementById("keys-import-btn").addEventListener("click", () => {
+        const added = parseKeysBlock(document.getElementById("keys-import-area").value);
+        keys = keys.concat(added);
+        saveKeys(); render();
+        document.getElementById("keys-import-msg").textContent = `added ${added.length} key(s)`;
+    });
+    document.getElementById("keys-import-replace-btn").addEventListener("click", () => {
+        if (!window.confirm("Replace the entire current keyset with the pasted import?")) return;
+        keys = parseKeysBlock(document.getElementById("keys-import-area").value);
+        saveKeys(); render();
+        document.getElementById("keys-import-msg").textContent = `replaced with ${keys.length} key(s)`;
+    });
+
+    // ---- download / upload keyset (plain-text, same 5-line block format) ----
+    document.getElementById("keys-download-btn").addEventListener("click", () => {
+        const blob = new Blob([serializeKeysBlock(keys)], { type: "text/plain" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = `ffstream-keys-${Date.now()}.txt`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+    });
+    const keysUploadInput = document.getElementById("keys-upload-input");
+    document.getElementById("keys-upload-btn").addEventListener("click", () => keysUploadInput.click());
+    keysUploadInput.addEventListener("change", () => {
+        const file = keysUploadInput.files[0];
+        keysUploadInput.value = "";
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+            if (!window.confirm("Replace the entire current keyset with this file?")) return;
+            keys = parseKeysBlock(reader.result);
+            saveKeys(); render();
+        };
+        reader.readAsText(file);
+    });
+
+    // ---- named profiles (whole keyset save/load, mirrors the upscaler
+    // profile pattern: {name: keysArray} in its own localStorage key) ----
+    const keysProfileSelect = document.getElementById("keys-profile-select");
+    function keysLoadProfiles() {
+        try { return JSON.parse(localStorage.getItem(KEYS_PROFILES_KEY) || "{}"); }
+        catch (_) { return {}; }
+    }
+    function keysSaveProfiles(profiles) {
+        localStorage.setItem(KEYS_PROFILES_KEY, JSON.stringify(profiles));
+    }
+    function keysRefreshProfileSelect(selectName) {
+        const profiles = keysLoadProfiles();
+        const names = Object.keys(profiles).sort();
+        keysProfileSelect.innerHTML = "";
+        const noneOpt = document.createElement("option");
+        noneOpt.value = ""; noneOpt.textContent = "(none)";
+        keysProfileSelect.appendChild(noneOpt);
+        names.forEach(name => {
+            const opt = document.createElement("option");
+            opt.value = name; opt.textContent = name;
+            keysProfileSelect.appendChild(opt);
+        });
+        keysProfileSelect.value = names.includes(selectName) ? selectName : "";
+    }
+    keysRefreshProfileSelect("");
+
+    document.getElementById("keys-profile-save-new").addEventListener("click", () => {
+        const name = window.prompt("Save current keyset as new profile named:");
+        if (!name) return;
+        const profiles = keysLoadProfiles();
+        if (name in profiles && !window.confirm(`Profile "${name}" already exists. Overwrite it?`)) return;
+        profiles[name] = keys;
+        keysSaveProfiles(profiles);
+        keysRefreshProfileSelect(name);
+    });
+    document.getElementById("keys-profile-overwrite").addEventListener("click", () => {
+        const name = keysProfileSelect.value;
+        if (!name) { window.alert("No profile selected."); return; }
+        if (!window.confirm(`Overwrite profile "${name}" with current keyset?`)) return;
+        const profiles = keysLoadProfiles();
+        profiles[name] = keys;
+        keysSaveProfiles(profiles);
+        keysRefreshProfileSelect(name);
+    });
+    document.getElementById("keys-profile-load").addEventListener("click", () => {
+        const name = keysProfileSelect.value;
+        if (!name) { window.alert("No profile selected."); return; }
+        const profiles = keysLoadProfiles();
+        if (!(name in profiles)) { window.alert(`Profile "${name}" not found.`); return; }
+        // this overrides the current live keyset, same as the upscaler profiles do
+        keys = (profiles[name] || []).map(k => ({ ...k, id: k.id || genId() }));
+        saveKeys(); render();
+    });
+    document.getElementById("keys-profile-delete").addEventListener("click", () => {
+        const name = keysProfileSelect.value;
+        if (!name) { window.alert("No profile selected."); return; }
+        if (!window.confirm(`Delete profile "${name}"?`)) return;
+        const profiles = keysLoadProfiles();
+        delete profiles[name];
+        keysSaveProfiles(profiles);
+        keysRefreshProfileSelect("");
+    });
+
+    // ---- keysLayer is already a direct child of #upx-viewport, and that
+    // box itself becomes the fullscreen element (see the #upx-viewport:
+    // fullscreen CSS above), so no re-parenting is needed -- it just needs
+    // a re-render on fullscreen enter/exit since the box's on-screen pixel
+    // size changes and clamping depends on that. ----
+    document.addEventListener("fullscreenchange", render);
+    window.addEventListener("resize", render);
+
+    // ---- init ----
+    keys = loadKeys();
+    setLayerVisible(localStorage.getItem(KEYS_ENABLE_KEY) === "1");
+    render();
+})();
+
+// ---- full localStorage backup/restore ----
+// localStorage itself is a flat key->string map (never nested), so "dump"
+// is just: iterate every key, put it in a plain object, JSON.stringify,
+// download as .txt. "Restore" is the exact inverse: read the uploaded
+// file, JSON.parse, confirm, then setItem every key from it -- overwriting
+// any key that already exists, leaving every other existing key alone
+// (no clear() first). Both run synchronously/blocking, which is fine here.
+(function () {
+    document.getElementById("lsDumpBtn").addEventListener("click", () => {
+        const dump = {};
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            dump[key] = localStorage.getItem(key);
+        }
+        const blob = new Blob([JSON.stringify(dump, null, 2)], { type: "text/plain" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "ffstream-localstorage-" + Date.now() + ".txt";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    });
+
+    const lsRestoreBtn = document.getElementById("lsRestoreBtn");
+    const lsRestoreInput = document.getElementById("lsRestoreInput");
+    lsRestoreBtn.addEventListener("click", () => lsRestoreInput.click());
+    lsRestoreInput.addEventListener("change", () => {
+        const file = lsRestoreInput.files[0];
+        lsRestoreInput.value = ""; // allow re-selecting the same file later
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+            let data;
+            try {
+                data = JSON.parse(reader.result);
+            } catch (e) {
+                window.alert("could not parse file as JSON: " + e.message);
+                return;
+            }
+            if (!data || typeof data !== "object" || Array.isArray(data)) {
+                window.alert("file does not contain a flat key/value object");
+                return;
+            }
+            const keys = Object.keys(data);
+            const ok = window.confirm(
+                "This will overwrite " + keys.length + " localStorage key(s) on this page " +
+                "with values from the uploaded file. Other existing keys are left untouched. Continue?"
+            );
+            if (!ok) return;
+            let applied = 0;
+            for (const key of keys) {
+                const val = data[key];
+                // localStorage values are always strings -- if the dump had a
+                // non-string (e.g. someone hand-edited the file), stringify it.
+                localStorage.setItem(key, typeof val === "string" ? val : JSON.stringify(val));
+                applied++;
+            }
+            window.alert("restored " + applied + " key(s). Reload the page for all settings to take effect.");
+        };
+        reader.readAsText(file);
+    });
+})();
+
+// ---- press-and-hold repeat for step -/+ buttons ----
+document.querySelectorAll(".upx-step-minus,.upx-step-plus").forEach(btn => {
+    let holdTimeout = null, holdInterval = null;
+    function stopHold() {
+        clearTimeout(holdTimeout);
+        clearInterval(holdInterval);
+        holdTimeout = null;
+        holdInterval = null;
+    }
+    function startHold() {
+        stopHold();
+        holdTimeout = setTimeout(() => {
+            holdInterval = setInterval(() => btn.click(), 80);
+        }, 400);
+    }
+    btn.addEventListener("mousedown", startHold);
+    btn.addEventListener("touchstart", startHold, {passive:true});
+    btn.addEventListener("mouseup", stopHold);
+    btn.addEventListener("mouseleave", stopHold);
+    btn.addEventListener("touchend", stopHold);
+    btn.addEventListener("touchcancel", stopHold);
+});
+
+// ---- persist all adjustment inputs to localStorage, restore on load ----
+const UPX_SETTINGS_KEY = "upx-settings-v1-ffclientu";
+const upxPersistedIds = [
+    "upx-kernel", "upx-scale", "upx-tapradius", "upx-detailwin", "upx-detail",
+    "upx-sharp", "upx-cas", "upx-antiring",
+    "upx-bright", "upx-contrast", "upx-saturate", "upx-hue", "upx-gamma",
+    "upx-warmth", "upx-vignette"
+];
+const upxDefaults = {
+    "upx-kernel": "catmullrom", "upx-scale": "2", "upx-tapradius": "2", "upx-detailwin": "2", "upx-detail": "0",
+    "upx-sharp": "35", "upx-cas": "0", "upx-antiring": "0", "upx-bright": "100",
+    "upx-contrast": "100", "upx-saturate": "100", "upx-hue": "0",
+    "upx-gamma": "100", "upx-warmth": "0", "upx-vignette": "0"
+};
+
+function upxSaveSettings() {
+    const data = {};
+    upxPersistedIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) data[id] = el.value;
+    });
+    localStorage.setItem(UPX_SETTINGS_KEY, JSON.stringify(data));
+}
+
+function upxRestoreSettings(data) {
+    upxPersistedIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el || !(id in data)) return;
+        el.value = data[id];
+        el.dispatchEvent(new Event("input"));
+        el.dispatchEvent(new Event("change"));
+    });
+}
+
+try {
+    const saved = localStorage.getItem(UPX_SETTINGS_KEY);
+    if (saved) upxRestoreSettings(JSON.parse(saved));
+} catch (e) {}
+
+upxPersistedIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener("input", upxSaveSettings);
+    el.addEventListener("change", upxSaveSettings);
+});
+
+// ---- reset button: clears storage, restores hardcoded defaults ----
+function upxResetSettings() {
+    localStorage.removeItem(UPX_SETTINGS_KEY);
+    upxRestoreSettings(upxDefaults);
+}
+const resetBtn = document.createElement("button");
+resetBtn.textContent = "Reset";
+resetBtn.id = "upx-reset-settings";
+resetBtn.addEventListener("click", upxResetSettings);
+document.getElementById("upx-panel-offset").appendChild(resetBtn);
+
+// ---- named profiles: save current upxPersistedIds values under a name,
+// list them in a <select>, load/overwrite/delete by name. Stored as a
+// single {name: data} object under its own localStorage key, separate
+// from UPX_SETTINGS_KEY (which remains the always-current live settings
+// used on plain page load). window.prompt used for naming, as requested.
+const UPX_PROFILES_KEY = "upx-profiles-ffclientu";
+const profileSelect = document.getElementById("upx-profile-select");
+
+function upxLoadProfiles() {
+    try {
+        return JSON.parse(localStorage.getItem(UPX_PROFILES_KEY) || "{}");
+    } catch (e) {
+        return {};
+    }
+}
+
+function upxSaveProfiles(profiles) {
+    localStorage.setItem(UPX_PROFILES_KEY, JSON.stringify(profiles));
+}
+
+function upxCurrentSettingsData() {
+    const data = {};
+    upxPersistedIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) data[id] = el.value;
+    });
+    return data;
+}
+
+function upxRefreshProfileSelect(selectName) {
+    const profiles = upxLoadProfiles();
+    const names = Object.keys(profiles).sort();
+    profileSelect.innerHTML = "";
+    const noneOpt = document.createElement("option");
+    noneOpt.value = "";
+    noneOpt.textContent = "(none)";
+    profileSelect.appendChild(noneOpt);
+    names.forEach(name => {
+        const opt = document.createElement("option");
+        opt.value = name;
+        opt.textContent = name;
+        profileSelect.appendChild(opt);
+    });
+    profileSelect.value = names.includes(selectName) ? selectName : "";
+}
+upxRefreshProfileSelect("");
+
+document.getElementById("upx-profile-save-new").addEventListener("click", () => {
+    const name = window.prompt("Save current settings as new profile named:");
+    if (!name) return;
+    const profiles = upxLoadProfiles();
+    if (name in profiles && !window.confirm(`Profile "${name}" already exists. Overwrite it?`)) return;
+    profiles[name] = upxCurrentSettingsData();
+    upxSaveProfiles(profiles);
+    upxRefreshProfileSelect(name);
+});
+
+document.getElementById("upx-profile-overwrite").addEventListener("click", () => {
+    const name = profileSelect.value;
+    if (!name) { window.alert("No profile selected."); return; }
+    if (!window.confirm(`Overwrite profile "${name}" with current settings?`)) return;
+    const profiles = upxLoadProfiles();
+    profiles[name] = upxCurrentSettingsData();
+    upxSaveProfiles(profiles);
+    upxRefreshProfileSelect(name);
+});
+
+document.getElementById("upx-profile-load").addEventListener("click", () => {
+    const name = profileSelect.value;
+    if (!name) { window.alert("No profile selected."); return; }
+    const profiles = upxLoadProfiles();
+    if (!(name in profiles)) { window.alert(`Profile "${name}" not found.`); return; }
+    upxRestoreSettings(profiles[name]);
+});
+
+document.getElementById("upx-profile-delete").addEventListener("click", () => {
+    const name = profileSelect.value;
+    if (!name) { window.alert("No profile selected."); return; }
+    if (!window.confirm(`Delete profile "${name}"?`)) return;
+    const profiles = upxLoadProfiles();
+    delete profiles[name];
+    upxSaveProfiles(profiles);
+    upxRefreshProfileSelect("");
+});
+
+// ---- export/import: dump/load the raw profiles blob as a .txt (JSON
+// inside) file. Wrapped in a small versioned envelope so future fields
+// (per-profile metadata, new settings ids, etc) can be added later
+// without breaking older exports -- readers should ignore keys they don't
+// recognize and fall back to defaults for anything missing, rather than
+// require an exact shape match.
+//   formatVersion: bumped only on a breaking change to this envelope's
+//     own shape (not on every new persisted id -- upxPersistedIds/
+//     upxDefaults already handle that drift on the read side).
+//   profiles[name].settingsVersion: reserved for later, in case a given
+//     profile's *values* need a migration path independent of the
+//     envelope itself. Unused for now, just always written as 1.
+const UPX_EXPORT_FORMAT_VERSION = 1;
+
+function upxBuildExport() {
+    const rawProfiles = upxLoadProfiles();
+    const profiles = {};
+    Object.keys(rawProfiles).forEach(name => {
+        profiles[name] = { settingsVersion: 1, values: rawProfiles[name] };
+    });
+    return {
+        formatVersion: UPX_EXPORT_FORMAT_VERSION,
+        app: "asimpleu-upscaler-profiles",
+        exportedAt: new Date().toISOString(),
+        profiles
+    };
+}
+
+document.getElementById("upx-profiles-download").addEventListener("click", () => {
+    const dump = upxBuildExport();
+    const blob = new Blob([JSON.stringify(dump, null, 2)], { type: "text/plain" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `upx-profiles-${Date.now()}.txt`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+});
+
+// Parses an uploaded export. Accepts either the versioned envelope above,
+// or (for convenience/forward-compat with a plain profiles dump) a bare
+// {name: {id: value, ...}} object -- detected by absence of a
+// "formatVersion" key. Unknown envelope versions are still attempted on a
+// best-effort basis (profiles/values read the same way) rather than
+// rejected outright, since the profile *values* shape itself is governed
+// separately by upxPersistedIds.
+function upxParseImport(text) {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === "object" && "formatVersion" in parsed && parsed.profiles) {
+        const out = {};
+        Object.keys(parsed.profiles).forEach(name => {
+            const entry = parsed.profiles[name];
+            out[name] = (entry && typeof entry === "object" && entry.values) ? entry.values : entry;
+        });
+        return out;
+    }
+    // bare {name: values} fallback
+    if (parsed && typeof parsed === "object") return parsed;
+    throw new Error("unrecognized profile file format");
+}
+
+const uploadInput = document.getElementById("upx-profile-upload-input");
+document.getElementById("upx-profile-upload-btn").addEventListener("click", () => uploadInput.click());
+
+uploadInput.addEventListener("change", () => {
+    const file = uploadInput.files[0];
+    uploadInput.value = ""; // allow re-selecting the same file later
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+        let imported;
+        try {
+            imported = upxParseImport(reader.result);
+        } catch (e) {
+            window.alert(`Could not read profile file: ${e.message}`);
+            return;
+        }
+        const names = Object.keys(imported);
+        if (!names.length) { window.alert("File contained no profiles."); return; }
+
+        // Single-profile file -> ask once for the name to save it under
+        // (per the requested prompt-driven flow). Multi-profile file
+        // (e.g. a full "download all" export) -> import every profile
+        // under its original name, prompting per-name only on collision.
+        const profiles = upxLoadProfiles();
+        if (names.length === 1) {
+            const suggested = names[0];
+            const name = window.prompt("Save imported profile as:", suggested);
+            if (!name) return;
+            if (name in profiles && !window.confirm(`Profile "${name}" already exists. Overwrite it?`)) return;
+            profiles[name] = imported[suggested];
+            upxSaveProfiles(profiles);
+            upxRefreshProfileSelect(name);
+        } else {
+            let imported_count = 0, skipped_count = 0;
+            names.forEach(name => {
+                if (name in profiles && !window.confirm(`Profile "${name}" already exists. Overwrite it?`)) {
+                    skipped_count++;
+                    return;
+                }
+                profiles[name] = imported[name];
+                imported_count++;
+            });
+            upxSaveProfiles(profiles);
+            upxRefreshProfileSelect(names[0]);
+            window.alert(`Imported ${imported_count} profile(s)${skipped_count ? `, skipped ${skipped_count}` : ""}.`);
+        }
+    };
+    reader.readAsText(file);
+});
+
+})();
+</script>
+
+</body>
+</html>
